@@ -17,6 +17,14 @@ DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. *
 Install `Node.js`, then run:
 
 ```sh
+npx @deepseek-ai/dsh
+```
+
+The command opens the terminal interface; `dsh "run the tests"` opens it and starts on that task. See the [terminal front door](packages/ui/tui/README.md).
+
+For the browser interface instead:
+
+```sh
 npx @deepseek-ai/dsh web
 ```
 
@@ -31,7 +39,7 @@ git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm dsh
 ```
 
 ## Community and support

@@ -30,19 +30,20 @@ packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
   workflow/    workflow capability + worker-thread provider + tool Consumer
   todo/        todo_write tool
   plan/        plan mode as logged state
-  preset/      per-session agent composition from preset cordis.yml files
+  preset/      per-session composition from preset cordis.yml files
   guard/       loop-hygiene + tool-timeout plugins
   self-modification/  the agent inspects/mounts its own plugins
   hooks/       Claude Code/Codex hook bridges + wire-protocol library
-  session/     durable session data: persistence, projection, titles, telemetry
+  session/     persistence, projection, titles, telemetry
   identity/    anonymous identity
   settings/    user-settings capability + file provider
   credentials/ credential-reference capability + env/.env provider
   acp/         automation-only Agent Client Protocol server
-  interaction/ approval/interaction capabilities, permission, commands, ask-user
+  interaction/ approval/interaction, permission, commands, ask-user
+  ui/          terminal front door
   boot/        shared app-bin glue
   sdk/         JSON-RPC protocol, server, and TypeScript client
-  examples/    demo bundles (agent-spine + CLI/ACP/JSON-RPC bins)
+  examples/    demo bundles (agent-spine + CLI/ACP/JSON-RPC)
   support/     dev/test infrastructure
   util/        zero-dependency utilities
 python/      Python SDK and bundled runtime (see python/README.md)

@@ -778,6 +778,17 @@
         "@deepseek-ai/dsh-code-runtime-worker-thread"
       ]
     },
+    "packages/bundle/tui-app": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-code-runtime-worker-thread",
+        "@deepseek-ai/dsh-tui"
+      ]
+    },
+    "packages/ui/tui": {
+      "ignoreDependencies": [
+        "node-pty"
+      ]
+    },
     "packages/bundle/web-app": {
       "ignoreDependencies": [
         "@deepseek-ai/.+"

@@ -10,8 +10,10 @@
  * `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
  * and `dsh --profile web -h` prints the web app's help, not this one's.
  *
- * `web` is a hardcoded alias for `--profile web`; `plugin` manages a profile's
- * plugin dependencies by forwarding to pnpm.
+ * Omitting `--profile` boots {@link DEFAULT_PROFILE}, so `dsh` and
+ * `dsh "<task>"` open the terminal. `web` is a hardcoded alias for
+ * `--profile web`; `plugin` manages a profile's plugin dependencies by
+ * forwarding to pnpm.
  * @module @deepseek-ai/dsh/args
  */
 
@@ -60,14 +62,19 @@ interface BootOptions {
  */
 const collect = (value: string, previous: string[] = []): string[] => [...previous, value]
 
+/** The profile a launch with no `--profile` boots. */
+const DEFAULT_PROFILE = 'tui'
+
 /** The launcher's own help text; each app prints its own. */
 const HELP_EXAMPLES = `
 Examples:
-  dsh --profile web                          boot the web profile (same as: dsh web)
+  dsh                                        open the terminal (same as: dsh --profile tui)
+  dsh "run the tests"                        open the terminal and start on that task
+  dsh --resume <session>                     arguments after the launcher flags reach the app
+  dsh --profile tui --help                   the terminal app's own flags and help
   dsh --profile headless "run the tests"     answer one task, print the result, and exit
-  dsh --profile tui --patch ./extra.yml      boot a custom profile with one extra overlay
-  dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
-  dsh --profile web --help                   the web app's own flags and help
+  dsh --profile web                          boot the web profile (same as: dsh web)
+  dsh --patch ./extra.yml                    boot with one extra overlay
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
 `
 
@@ -117,7 +124,7 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
   program
     .name('dsh')
     .version(version, '-V, --version', 'output the version number')
-    .description('dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch layers under your own overrides.')
+    .description('dsh: open the DeepSeek Harness terminal, or boot another profile — an ordered stack of plugin-bundle patch layers under your own overrides.')
     .addHelpText('after', HELP_EXAMPLES)
     .exitOverride()
     // The launcher's flags come first and end at the first token it does not
@@ -128,18 +135,19 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
     .passThroughOptions()
     .enablePositionalOptions()
     .argument('[args...]', 'arguments for the booted profile\'s app (see: dsh --profile <name> --help)')
-    .option('--profile <name>', 'the profile under $DSH_HOME/profiles to boot')
+    .option('--profile <name>', `the profile under $DSH_HOME/profiles to boot (default: ${DEFAULT_PROFILE})`)
     .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
     .option('--dump-config', 'print the composed profile tree and exit')
     .option('--dump-default-config', 'print the profile tree without its user layer or --patch overlays and exit')
     .action((args: string[], options: BootOptions & { profile?: string }) => {
-      // With the app owning -h, the launcher's own help is what a bare
-      // `dsh -h` (no profile to hand it to) must print.
-      if (options.profile === undefined) {
-        if (args.some(argument => argument === '-h' || argument === '--help')) program.help()
-        program.error('error: --profile <name> is required')
+      // With the app owning -h, an explicitly named profile hands its own help
+      // to the app; a launch that named no profile has no app to hand it to
+      // yet, so the launcher's own help is what `dsh -h` must print.
+      if (options.profile === undefined
+        && args.some(argument => argument === '-h' || argument === '--help')) {
+        program.help()
       }
-      const profile = options.profile
+      const profile = options.profile ?? DEFAULT_PROFILE
       if (profile === '') program.error('error: --profile needs a name')
       resolved = resolveBoot(program, profile, options, args)
     })

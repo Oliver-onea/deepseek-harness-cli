@@ -24,7 +24,7 @@ describe('dsh SOURCE launcher (node --import tsx/esm)', () => {
     expect(rootPackage.scripts?.dsh).toBe('node --import tsx/esm apps/cli/src/bin.ts')
   })
 
-  it('boots the source entry and requires a profile', async () => {
+  it('boots the source entry into the terminal profile and refuses a piped launch', async () => {
     const result = await execa(process.execPath, ['--import', 'tsx/esm', dshSourceBin], {
       cwd: repoRoot,
       input: '',
@@ -36,7 +36,8 @@ describe('dsh SOURCE launcher (node --import tsx/esm)', () => {
       throw new Error(`dsh source launch did not exit within 25s. stdout:\n${result.stdout}\nstderr:\n${result.stderr}`)
     }
     expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain('--profile <name> is required')
-    expect(result.stdout).toBe('')
+    // Bare `dsh` boots the terminal profile, whose front door fails loud
+    // rather than degrading to line-oriented output on pipes.
+    expect(result.stderr).toContain('needs a TTY on both stdin and stdout')
   }, 30_000)
 })

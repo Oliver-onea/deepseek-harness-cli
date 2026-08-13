@@ -2796,6 +2796,32 @@ export type ToolPresentationMode = 'native' | 'code' | 'both'
 
 Source: [`packages/core/tools/src/index.ts:654`](../packages/core/tools/src/index.ts)
 
+<a id="deepseek-aidsh-tui"></a>
+
+## `@deepseek-ai/dsh-tui`
+
+Requires: `agents` · `timer` · `tools`
+
+```ts config-catalog
+/** Plugin config. */
+export interface Config {
+  /** The exact session id of the agent this terminal drives, as created by the host. */
+  session: string
+  /** Whether to style output; `false` renders the same layout without SGR sequences. */
+  color?: boolean
+  /** Lines kept at the head of a folded tool-card body. */
+  headLines?: number
+  /** Lines kept at the tail of a folded tool-card body. */
+  tailLines?: number
+  /** Whether reasoning starts visible; a terminal control toggles it either way. */
+  showReasoning?: boolean
+  /** A first prompt to submit once the screen is up, for `dsh "<task>"`. */
+  task?: string
+}
+```
+
+Source: [`packages/ui/tui/src/index.ts:56`](../packages/ui/tui/src/index.ts)
+
 <a id="deepseek-aidsh-typert-loader"></a>
 
 ## `@deepseek-ai/dsh-typert-loader`
@@ -3146,6 +3172,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-session-title-llm` ([`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts))
 - `@deepseek-ai/dsh-subagent-in-process-driver` ([`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts))
 - `@deepseek-ai/dsh-timeout` ([`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts))
+- `@deepseek-ai/dsh-tui-app` ([`packages/bundle/tui-app/src/index.ts`](../packages/bundle/tui-app/src/index.ts))
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))
 - `@deepseek-ai/dsh-typert-registry` ([`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts))

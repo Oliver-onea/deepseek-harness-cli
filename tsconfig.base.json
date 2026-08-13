@@ -135,6 +135,7 @@
         "./packages/workspace/*/src/invariant.ts",
         "./packages/sdk/*/src/invariant.ts",
         "./packages/interaction/*/src/invariant.ts",
+        "./packages/ui/*/src/invariant.ts",
         "./packages/boot/*/src/invariant.ts",
         "./packages/examples/*/src/invariant.ts",
         "./packages/util/*/src/invariant.ts",
@@ -149,6 +150,7 @@
       "@deepseek-ai/dsh-client-*/invariant": ["./packages/client/*/src/invariant.ts"],
       "@deepseek-ai/dsh-headless/startup": ["./packages/bundle/headless/src/startup.ts"],
       "@deepseek-ai/dsh-web-app/startup": ["./packages/bundle/web-app/src/startup.ts"],
+      "@deepseek-ai/dsh-tui-app/startup": ["./packages/bundle/tui-app/src/startup.ts"],
       "@deepseek-ai/dsh-client-*/client": ["./packages/client/*/src/client"],
        // One wildcard maps every @deepseek-ai/dsh-<name> to its source. Package
       // dir names are unique across groups, so first-on-disk-wins resolution is
@@ -265,6 +267,7 @@
         "./packages/workspace/*/src",
         "./packages/sdk/*/src",
         "./packages/interaction/*/src",
+        "./packages/ui/*/src",
         "./packages/boot/*/src",
         "./packages/examples/*/src",
         "./packages/util/*/src",
