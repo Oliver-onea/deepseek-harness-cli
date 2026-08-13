@@ -243,10 +243,11 @@ describe('TerminalShell', () => {
   })
 
   it('reports a thrown non-Error command failure without losing its text', async () => {
+    // A handler may reject with any value; the terminal still has to name it.
+    const thrown: unknown = 'plain string failure'
     const commands = {
       find: (_agent: Agent, name: string) => (name === 'boom' ? { name } : undefined),
-      // eslint-disable-next-line prefer-promise-reject-errors -- a handler may throw any value.
-      execute: () => Promise.reject('plain string failure'),
+      execute: () => { throw thrown },
     } as unknown as CommandRuntime
     const { shell, tui } = shellFor({ commands })
     shell.start()
