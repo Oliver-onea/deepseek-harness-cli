@@ -138,6 +138,15 @@ export class Transcript {
   }
 
   /**
+   * Append one terminal-only remark that no durable event carries.
+   * @param tone - how prominently the remark reads.
+   * @param text - the remark.
+   */
+  notice(tone: NoticeTone, text: string): void {
+    this.items.push({ kind: 'notice', tone, text: displayText(text) })
+  }
+
+  /**
    * Fold one durable event into the transcript.
    * @param event - the appended session event.
    * @returns whether the drawn content changed.

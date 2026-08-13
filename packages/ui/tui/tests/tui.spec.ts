@@ -114,6 +114,26 @@ describe('resolveTerminalConfig', () => {
   })
 })
 
+describe('resolveSelection', () => {
+  const fallback = { provider: 'd', model: 'dm' }
+
+  it('prefers the route the composition configured for this agent', () => {
+    const agent = { options: { provider: 'p', model: 'm' } } as unknown as Agent
+    expect(tui.resolveSelection(agent, fallback)).toEqual({ provider: 'p', model: 'm' })
+  })
+
+  it('falls back to the deployment default when the agent names a partial route', () => {
+    const halfRoute = { options: { provider: 'p' } } as unknown as Agent
+    expect(tui.resolveSelection(halfRoute, fallback)).toEqual(fallback)
+    const noRoute = { options: {} } as unknown as Agent
+    expect(tui.resolveSelection(noRoute, fallback)).toEqual(fallback)
+  })
+
+  it('leaves the selection unset when nothing names a route', () => {
+    expect(tui.resolveSelection({ options: {} } as unknown as Agent, undefined)).toBeUndefined()
+  })
+})
+
 describe('isInteractiveProcess', () => {
   it.each([
     [true, true, true],

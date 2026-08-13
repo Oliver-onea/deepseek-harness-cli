@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Component, OverlayHandle, Terminal, ViewportTUI } from '@earendil-works/pi-tui'
 import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
-import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
+import { CommandId, type CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TerminalShell, classifySubmission, commandNameOf, paneTitle } from '../src/shell.ts'
@@ -228,6 +228,47 @@ describe('TerminalShell', () => {
     await submit(tui, '/compact')
     expect(execute).toHaveBeenCalledOnce()
     expect(agent.followups).toHaveLength(0)
+  })
+
+  it('keeps a throwing command from ending the session, and shows what the log did not record', async () => {
+    const commands = {
+      find: (_agent: Agent, name: string) => (name === 'boom' ? { name } : undefined),
+      execute: () => Promise.reject(new Error('handler exploded')),
+    } as unknown as CommandRuntime
+    const { shell, tui } = shellFor({ commands })
+    shell.start()
+    await submit(tui, '/boom')
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).toContain('handler exploded')
+  })
+
+  it('reports a thrown non-Error command failure without losing its text', async () => {
+    const commands = {
+      find: (_agent: Agent, name: string) => (name === 'boom' ? { name } : undefined),
+      // eslint-disable-next-line prefer-promise-reject-errors -- a handler may throw any value.
+      execute: () => Promise.reject('plain string failure'),
+    } as unknown as CommandRuntime
+    const { shell, tui } = shellFor({ commands })
+    shell.start()
+    await submit(tui, '/boom')
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).toContain('plain string failure')
+  })
+
+  it('leaves a failure the command log already recorded to the transcript', async () => {
+    const agent = fakeAgent()
+    const commands = {
+      find: (_agent: Agent, name: string) => (name === 'boom' ? { name } : undefined),
+      execute: () => {
+        agent.session.append('command/done', { commandId: CommandId('cmd-1'), kind: 'error', text: 'recorded reason' })
+        return Promise.reject(new Error('handler exploded'))
+      },
+    } as unknown as CommandRuntime
+    const { shell, tui } = shellFor({ agent, commands })
+    shell.start()
+    await submit(tui, '/boom')
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).not.toContain('handler exploded')
   })
 
   it('prompts the model with a slash line the registry does not resolve', async () => {

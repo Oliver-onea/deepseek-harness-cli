@@ -236,11 +236,36 @@ export class TerminalShell implements PanelHost {
     const submission = classifySubmission(line, known)
     if (submission.kind === 'command') {
       // The registry is what resolved this line, so it exists here.
-      await (commands as CommandRuntime).execute(agent, submission.line, new AbortController().signal)
-      this.refreshStatus()
+      await this.runCommand(commands as CommandRuntime, submission.line)
       return
     }
     this.prompt(submission.text)
+  }
+
+  /**
+   * Execute one resolved command. A handler that throws must not escape as an
+   * unhandled rejection — that would end the process with the terminal still in
+   * the alternate screen. The registry logs `command/done` before rethrowing,
+   * so the transcript already carries the reason; this adds a line only when
+   * the failure happened before that record existed.
+   * @param commands - the registry that resolved the line.
+   * @param line - the complete slash-command line.
+   */
+  private async runCommand(commands: CommandRuntime, line: string): Promise<void> {
+    const agent = this.options.agent
+    const before = agent.session.seq
+    try {
+      await commands.execute(agent, line, new AbortController().signal)
+    } catch (error: unknown) {
+      const recorded = agent.session.events
+        .slice(before)
+        .some(event => event.type === 'command/done')
+      if (!recorded) {
+        this.transcript.notice('error', error instanceof Error ? error.message : String(error))
+      }
+      this.options.tui.requestRender()
+    }
+    this.refreshStatus()
   }
 
   /**
