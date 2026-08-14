@@ -26,7 +26,7 @@ agent 平面保持在 `dsh-base` 放置的位置。这个界面是单会话的�
 
 它还拥有三项 agent 作用域状态，原因都是：在单会话组合中没有别的行能承担。它们是 `userQuestions` 提供者、仅作用于自身 agent 的 `approval/request` 应答器（其他 agent 的提问交由调用链其余部分处理），以及填充 persona 的 `{{provider}}`/`{{model}}` 变量并路由每次请求的模型选择引用。`agent-loop` 不为已配置的 agent 安装该引用 —— 由入口点安装，正如 `dsh-headless` 与 Web 宿主一直所做的那样。
 
-它要求 stdin 与 stdout 都是 TTY，否则在挂载时抛错而非退化；并且只在它所指名的 agent 存在之后才接管屏幕，因此启动失败会报告到普通终端。
+它要求 stdin 与 stdout 都是 TTY，否则在挂载时抛出带类型的启动拒绝，而不发生退化。启动提供者会先通过 Session 持久化检查请求恢复的会话，再发布自身服务；渲染器等待指定 agent 的时间只持续到经过验证的 `agentWaitTimeoutMs`。两项检查都在进入备用屏幕前完成，因此缺失或不可读的会话以及损坏的 agent 组合都会报告到普通终端。
 
 ### 终端所有权
 
@@ -42,7 +42,7 @@ agent 平面保持在 `dsh-base` 放置的位置。这个界面是单会话的�
 
 包级测试对折叠逻辑、卡片渲染器、底栏、提问面板、审批应答器与插件保持每文件 100% 覆盖率，并以替换的 `Terminal` 与真实 `SessionStore` 驱动真实插件体，使 append 像生产环境一样发布 `session/event`。
 
-一个 PTY 测试获得许可，因为被测对象就是终端接管本身，而管道无法证明它（[将 PTY 保留给此情形的测试策略](../../archived/simplification/2026-07-20-retire-readline-front-door.md)）：`packages/ui/tui/tests/pty-boot.spec.ts` 通过 `dsh` 启动器针对无密钥 mock 模型启动随产品发布的 `tui` profile，提交提示，等待答案出现在屏幕上，并以 `/exit` 退出、退出码为 0。
+PTY 覆盖获得许可，因为被测对象就是终端接管本身，而管道无法证明它（[将 PTY 保留给此情形的测试策略](../../archived/simplification/2026-07-20-retire-readline-front-door.md)）：`packages/ui/tui/tests/pty-boot.spec.ts` 通过 `dsh` 启动器针对无密钥 mock 模型启动随产品发布的 `tui` profile，提交提示，等待答案出现在屏幕上，并以 `/exit` 退出、退出码为 0。同一个真实组合还证明，stdin 或 stdout 被重定向时只会收到一行拒绝，并且缺失或损坏的恢复日志会在进入备用屏幕前失败。
 
 ## 考虑过的替代方案
 
@@ -58,6 +58,6 @@ agent 平面保持在 `dsh-base` 放置的位置。这个界面是单会话的�
 
 无参数的 `dsh` 打开终端对话，`dsh "<task>"` 以该任务开始一次对话。Web 仍是随产品发布的浏览器界面，headless 仍是一次性自动化入口；两者都没有变化。
 
-组合 `dsh-tui` 的部署必须提供 TTY 与 `ctx.appExit`，并且必须指名一个由自身组合创建的 agent 的会话 id。没有 `ctx.commands` 的组合仍可工作 —— 编辑器把每一行都送给模型，`/exit` 不可用，`ctrl+c` 成为退出方式。
+组合 `dsh-tui` 的部署必须提供 TTY 与 `ctx.appExit`，并且必须指名一个由自身组合创建的 agent 的会话 id；当启动延迟不同于默认的 30 秒时，还可以设置 `agentWaitTimeoutMs`。没有 `ctx.commands` 的组合仍可工作 —— 编辑器把每一行都送给模型，`/exit` 不可用，`ctrl+c` 成为退出方式。
 
 终端模型选择器现在有了写入位置：模型选择引用已由该前门安装并拥有，只是还没有命令暴露它。

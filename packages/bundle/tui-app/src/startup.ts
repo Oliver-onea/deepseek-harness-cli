@@ -11,12 +11,15 @@ import { randomUUID } from 'node:crypto'
 import { Command } from 'commander'
 import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
+import { StartupRefusalError } from '@deepseek-ai/dsh-app-boot/errors'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui-startup'
 
-/** Services required before the flags can be resolved. */
-export const inject = ['cmdlineArgs']
+/** Services required before the flags and any resume target can be resolved. */
+export const inject = ['cmdlineArgs', 'sessionPersistence']
 
 /** Service provided by this ordinary plugin and injected by flag-configured rows. */
 export const TUI_STARTUP_SERVICE = 'tuiStartup'
@@ -111,18 +114,40 @@ export function resolveStartup(options: TuiOptions, task: string, cwd: string): 
   }
 }
 
+/** Render an error caught at the persistence boundary for a startup refusal. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /**
- * Parse and provide the terminal invocation as an ordinary Cordis service. On
- * `--help` the action never runs, so no service is provided and no agent or
- * screen is composed.
+ * Parse and provide the terminal invocation as an ordinary Cordis service. A
+ * requested resume target is inspected through the configured persistence
+ * backend before dependent rows can activate. On `--help` the action never
+ * runs, so no service is provided and no agent or screen is composed.
  * @param ctx - plugin context carrying the command line.
+ * @returns once any resume target is known to be readable and the startup
+ * values have been published.
  */
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
   const program = tuiCommand()
+  let startup: TuiStartupValues | undefined
   program.action(() => {
     const options = program.opts<TuiOptions>()
     if (options.resume === '') program.error('error: --resume needs a session id')
-    ctx.provide(TUI_STARTUP_SERVICE, resolveStartup(options, program.args.join(' '), process.cwd()) satisfies TuiStartupValues)
+    startup = resolveStartup(options, program.args.join(' '), process.cwd())
   })
   parseCmdline(ctx, program)
+  if (startup === undefined) return
+  const resume = startup.agent.resumeSessionId
+  if (resume !== undefined) {
+    try {
+      await ctx.sessionPersistence.inspect(SessionId(resume))
+    } catch (error) {
+      throw new StartupRefusalError(
+        `dsh: cannot resume session ${JSON.stringify(resume)}: ${errorMessage(error)}; check the session id and stored log, or omit --resume to start a new session`,
+        { cause: error },
+      )
+    }
+  }
+  ctx.provide(TUI_STARTUP_SERVICE, startup)
 }

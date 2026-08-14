@@ -1,8 +1,10 @@
 /** The terminal app's flag parsing and the startup values its rows read. */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionPersistence, SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import { apply, resolveStartup, TUI_STARTUP_SERVICE, type TuiStartupValues } from '../src/startup.ts'
 
 afterEach(() => {
@@ -11,7 +13,10 @@ afterEach(() => {
 })
 
 /** Parse one argv through the REAL cmdline host and read what it provided. */
-async function parse(argv: readonly string[]): Promise<{
+async function parse(argv: readonly string[], inspect: (id: SessionId) => Promise<SessionInspection> = async id => ({
+  meta: { id, version: 0, createdAt: 0, delegationDepth: 0 },
+  events: [],
+})): Promise<{
   values: TuiStartupValues | undefined
   exits: number[]
   output: string
@@ -23,7 +28,8 @@ async function parse(argv: readonly string[]): Promise<{
   internals.stdout = observing
   internals.stderr = observing
   provideCmdline(ctx, { args: [...argv], exit: (code: number) => { exits.push(code) } })
-  await ctx.plugin({ name: 'tui-startup-under-test', inject: ['cmdlineArgs'], apply })
+  ctx.provide('sessionPersistence', { inspect } as unknown as SessionPersistence)
+  await ctx.plugin({ name: 'tui-startup-under-test', inject: ['cmdlineArgs', 'sessionPersistence'], apply })
   await ctx.fiber.await()
   return { values: ctx.get(TUI_STARTUP_SERVICE) as TuiStartupValues | undefined, exits, output }
 }
@@ -78,11 +84,30 @@ describe('the dsh terminal command line', () => {
   })
 
   it('reads the resume, route, and color flags', async () => {
-    const { values } = await parse(['--resume', 'session-x', '--model', 'm', '--provider', 'p', '--no-color'])
+    const inspect = vi.fn(async (id: SessionId) => ({
+      meta: { id: SessionId(id), version: 0, createdAt: 0, delegationDepth: 0 },
+      events: [],
+    }))
+    const { values } = await parse(['--resume', 'session-x', '--model', 'm', '--provider', 'p', '--no-color'], inspect)
     expect(values?.session).toBe('session-x')
     expect(values?.agent.model).toBe('m')
     expect(values?.agent.provider).toBe('p')
     expect(values?.color).toBe(false)
+    expect(inspect).toHaveBeenCalledWith(SessionId('session-x'))
+  })
+
+  it('refuses an unknown or unreadable resume before publishing startup values', async () => {
+    const inspect = vi.fn(() => Promise.reject(new Error('session "session-broken" not found')))
+    await expect(parse(['--resume', 'session-broken'], inspect)).rejects.toThrow(
+      'cannot resume session "session-broken": session "session-broken" not found; check the session id and stored log, or omit --resume to start a new session',
+    )
+  })
+
+  it('renders a non-Error persistence rejection at the durable boundary', async () => {
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the non-Error rejection is the durable-boundary case under test
+    await expect(parse(['--resume', 'session-broken'], () => Promise.reject('storage offline'))).rejects.toThrow(
+      'cannot resume session "session-broken": storage offline; check the session id and stored log, or omit --resume to start a new session',
+    )
   })
 
   it('composes neither an agent nor a screen for --help', async () => {

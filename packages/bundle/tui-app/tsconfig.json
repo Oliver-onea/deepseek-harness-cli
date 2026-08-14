@@ -15,6 +15,15 @@
       "path": "../../boot/cmdline"
     },
     {
+      "path": "../../boot/app-boot"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../session/session-persistence"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

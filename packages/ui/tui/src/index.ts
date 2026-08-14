@@ -14,6 +14,7 @@
 import { ProcessTerminal, TuiAltScreen, matchesKey, type Terminal, type ViewportTUI } from '@earendil-works/pi-tui'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { StartupRefusalError } from '@deepseek-ai/dsh-app-boot/errors'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -52,6 +53,9 @@ const DEFAULT_HEAD_LINES = 8
 /** Lines kept at the tail of a folded tool-card body when nothing states otherwise. */
 const DEFAULT_TAIL_LINES = 4
 
+/** Default bound for waiting on the composition's configured agent. */
+export const DEFAULT_AGENT_WAIT_TIMEOUT_MS = 30_000
+
 /** Plugin config. */
 export interface Config {
   /** The exact session id of the agent this terminal drives, as created by the host. */
@@ -66,6 +70,8 @@ export interface Config {
   showReasoning?: boolean
   /** A first prompt to submit once the screen is up, for `dsh "<task>"`. */
   task?: string
+  /** Maximum time to wait for the configured agent before refusing startup. */
+  agentWaitTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -75,6 +81,7 @@ export const Config: z<Config> = z.object({
   tailLines: z.natural().default(DEFAULT_TAIL_LINES),
   showReasoning: z.boolean().default(false),
   task: z.string(),
+  agentWaitTimeoutMs: z.number().step(1).min(1).default(DEFAULT_AGENT_WAIT_TIMEOUT_MS),
 })
 
 /** The terminal settings after defaulting: what {@link TerminalShell} reads. */
@@ -87,6 +94,8 @@ export interface ResolvedConfig {
   tailLines: number
   /** Whether reasoning starts visible. */
   showReasoning: boolean
+  /** Maximum time to wait for the configured agent. */
+  agentWaitTimeoutMs: number
 }
 
 /**
@@ -103,6 +112,7 @@ export function resolveTerminalConfig(config: Config): ResolvedConfig {
     headLines: config.headLines ?? DEFAULT_HEAD_LINES,
     tailLines: config.tailLines ?? DEFAULT_TAIL_LINES,
     showReasoning: config.showReasoning ?? false,
+    agentWaitTimeoutMs: config.agentWaitTimeoutMs ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS,
   }
 }
 
@@ -131,26 +141,40 @@ export const internals: {
 
 /**
  * Resolve the agent for `session`, waiting for its creation when the loop has
- * not published it yet.
+ * not published it yet, but never beyond the configured startup deadline.
  * @param ctx - plugin context carrying the agent registry.
  * @param session - the session id the host created its agent with.
+ * @param timeoutMs - maximum time to wait for publication.
  * @returns the live agent, or `undefined` when the tree disposes first.
+ * @throws {@link StartupRefusalError} when the deadline expires.
  */
-function whenAgent(ctx: Context, session: SessionId): Promise<Agent | undefined> {
+function whenAgent(ctx: Context, session: SessionId, timeoutMs: number): Promise<Agent | undefined> {
   const existing = ctx.agents.get(session)
   if (existing !== undefined) return Promise.resolve(existing)
-  return new Promise<Agent | undefined>((resolve) => {
+  return new Promise<Agent | undefined>((resolve, reject) => {
+    let settled = false
+    const finish = (agent: Agent | undefined, error?: StartupRefusalError): void => {
+      if (settled) return
+      settled = true
+      stop()
+      stopTimeout()
+      if (error === undefined) resolve(agent)
+      else reject(error)
+    }
     const stop = ctx.on('agent/created', ({ agent }) => {
       if (agent.session.id !== session) return
-      stop()
-      resolve(agent)
+      finish(agent)
     })
+    const stopTimeout = ctx.timeout(() => {
+      finish(undefined, new StartupRefusalError(
+        `dsh-tui: agent for session ${JSON.stringify(session)} did not appear within ${String(timeoutMs)}ms; check the agent composition or increase agentWaitTimeoutMs`,
+      ))
+    }, timeoutMs)
     // Disposal before the agent arrives settles the wait, so a torn-down tree
     // never leaves this plugin holding a promise nothing will resolve.
     ctx.effect(function* () {
       yield () => {
-        stop()
-        resolve(undefined)
+        finish(undefined)
       }
     }, 'dsh-tui.agent-wait')
   })
@@ -212,12 +236,14 @@ export function resolveSelection(
  * Mount the terminal front door.
  * @param ctx - plugin context carrying the agent and tool registries.
  * @param config - validated terminal config.
+ * @returns once the screen has mounted or startup has been refused.
  */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: Config): Promise<void> {
   if (!internals.interactive()) {
-    throw new Error('dsh-tui: the terminal front door needs a TTY on both stdin and stdout; use the headless app for pipes and automation')
+    throw new StartupRefusalError('dsh-tui: the terminal front door needs a TTY on both stdin and stdout; use the headless app for pipes and automation')
   }
-  void start(ctx, config).catch((error: unknown) => {
+  return start(ctx, config).catch((error: unknown) => {
+    if (error instanceof StartupRefusalError) throw error
     ctx.logger.error(`dsh-tui: ${error instanceof Error ? error.message : String(error)}`)
     ctx.get('appExit')?.(1)
   })
@@ -231,10 +257,10 @@ export function apply(ctx: Context, config: Config): void {
  * @param config - validated terminal config.
  */
 async function start(ctx: Context, config: Config): Promise<void> {
-  const agent = await whenAgent(ctx, SessionId(config.session))
+  const settings = resolveTerminalConfig(config)
+  const agent = await whenAgent(ctx, SessionId(config.session), settings.agentWaitTimeoutMs)
   if (agent === undefined) return
 
-  const settings = resolveTerminalConfig(config)
   const palette = createPalette(settings.color)
   const defaultRoute = ctx.get('agentDefaultModel')?.currentSelection()
   // The selection is agent-scoped state this front door owns: it fills the

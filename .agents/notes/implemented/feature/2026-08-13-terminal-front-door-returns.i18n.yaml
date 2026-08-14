@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-13-terminal-front-door-returns.md
-2026-08-13-terminal-front-door-returns.md: ff539d9ad8f635a7faa770fb7db93fc32d730094
-2026-08-13-terminal-front-door-returns.zh.md: bb15d83a8c2a6e110d544c9efba68c0b5699db47
+2026-08-13-terminal-front-door-returns.md: 6c1b4d87c1d51c30b01601250bbf3bd0607ae421
+2026-08-13-terminal-front-door-returns.zh.md: 9b8c3dcd631a2bd241028be358353c6fc0a3fca5

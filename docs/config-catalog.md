@@ -2817,10 +2817,12 @@ export interface Config {
   showReasoning?: boolean
   /** A first prompt to submit once the screen is up, for `dsh "<task>"`. */
   task?: string
+  /** Maximum time to wait for the configured agent before refusing startup. */
+  agentWaitTimeoutMs?: number
 }
 ```
 
-Source: [`packages/ui/tui/src/index.ts:56`](../packages/ui/tui/src/index.ts)
+Source: [`packages/ui/tui/src/index.ts:60`](../packages/ui/tui/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 

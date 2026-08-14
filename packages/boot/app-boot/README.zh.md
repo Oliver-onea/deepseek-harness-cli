@@ -11,6 +11,7 @@
 | `loadLayeredEnv(binName, cwd?, warn?)` | 构建产品 CLI（命令行界面）冻结的「继承环境 > 项目 `.env` > 用户 `.env`」快照，拒绝文件中的 bootstrap-only 变量，并在不替换继承值的前提下物化其余文件值 |
 | `installFailLoud(binName, proc?, release?)` | 将启动期或后续未处理的 Loader 拒绝转换为一行带标签的 stderr 消息并执行 `exit(1)`；两者之间会等待可选的 `release` 清理钩子（以 `FAIL_LOUD_RELEASE_TIMEOUT_MS` 为上限），使持有终端的界面能在退出前恢复终端；返回卸载函数 |
 | `FAIL_LOUD_RELEASE_TIMEOUT_MS` | `installFailLoud` 等待其 `release` 回调的时长；卡死的 disposer 只会延迟致命退出，而不会取消它 |
+| `StartupRefusalError` / `classifyStartupFailure(error)` | 标记用户可修正的启动失败，并在进程边缘对捕获的失败分类；分类器沿标准 `Error.cause` 链查找标记，为单行报告返回其消息，并保留每个未标记错误的完整崩溃堆栈 |
 | `assertEntriesLoaded(ctx, binName)` | 树结算后，如果其中存在已启用但没有 fiber 的条目，则抛出异常，并以 Cordis 启动故障的形式报告每个未解析插件的名称 |
 | `assertEntriesActivated(ctx, binName)` | 先执行 `assertEntriesLoaded` 检查，再在 Loader 结算后等待每个已启用配置项；抛出的错误包含每个失败插件的原始错误堆栈，或每个等待中插件尚未解析的服务 |
 | `loadOptionalPatches(binName, file)` | 解析一份可选的 patch 列表文件（即 profile 的 `cordis.patch.yml`）：其顶层是一个 YAML 数组，内容为 include 的 `PatchOptions`（按 id 定位的配置覆盖、`insert` 列表，允许 `!!js`）；文件不存在时返回 `undefined`，文件不可读、不可解析或内容不是数组时抛出异常 |
@@ -24,6 +25,8 @@
 | `HARNESS_SOURCE_SECTION` | `'harness:source'` 段落名称，供 `addHarnessSourceSection` 注册使用 |
 
 Loader 结算会在导入或生命周期失败时返回拒绝结果，并携带失败的配置项与阶段；`boot()` 会 dispose 部分构造的上下文，并用 bin 名称包装该失败。结算后遗留的配置项由独立审计处理：`assertEntriesLoaded` 将已启用却没有 fiber 的配置项转换为 rejection 并列出每个未解析插件；`assertEntriesActivated` 会显式等待每个失败的 fiber，把原始错误堆栈写入启动 rejection，并列出每个等待中配置项尚未解析的服务。抛出错误前，审计会通过一个进程级检查点标记这些 rejection 的确切原因，从而让 `installFailLoud` 将 Loader 的重复通知合并为一次，而所有无关的未处理 rejection 仍然致命。
+
+插件或持久输入读取器可以在用户可通过修正调用或配置解决启动问题时抛出 `StartupRefusalError`。启动包装器可以通过 `Error.cause` 增加上下文；`classifyStartupFailure` 沿该链查找标记，让进程边缘把标记消息作为一行 stderr 输出。未标记失败保留原始错误和堆栈，使内部崩溃仍可调试。
 
 Loader 并发挂载各个条目，因此当其他环节失败时，某个界面可能已经持有终端：此时不经过整棵树自身的拆卸就退出，会把 raw 模式、bracketed paste 和键盘协议残留在用户的 shell 上，而尚未返回的终端查询响应会在下一个提示符处显示为字面文本。配置树失败会经 `boot()` 结算：它先 dispose 部分构建的上下文（从而执行该界面自身的 shutdown），再抛出带标签的 rejection。对于 `boot()` 看不到的 rejection（插件游离的异步工作在挂载期间或挂载完成后失败），持有终端的 bin 会传入 `release`，在提交退出前 dispose 整棵树；`dsh` 在 `boot()` 的 `prepare` 回调中捕获根上下文，而不是取其返回值，使该回调覆盖整个挂载窗口。release 执行期间，处理函数保持注册并处于锁定状态：被报告的始终是第一个 rejection，后续拒绝（包括拆卸自身产生的拒绝）会被忽略，而不会变成未捕获错误、在拆卸中途杀死进程。
 

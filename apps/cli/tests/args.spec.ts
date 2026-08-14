@@ -59,6 +59,15 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'profile', profile: 'tui', patches: ['a.yml'], args: ['--resume', 'b', '--patch', 'late.yml'] })
   })
 
+  it('hands the option terminator to the app parser on either side of the app boundary', () => {
+    expect(parse(['--profile', 'headless', '--', '--help']))
+      .toEqual({ mode: 'profile', profile: 'headless', patches: [], args: ['--', '--help'] })
+    expect(parse(['--profile', 'headless', 'literal', '--', '--help']))
+      .toEqual({ mode: 'profile', profile: 'headless', patches: [], args: ['literal', '--', '--help'] })
+    expect(parse(['--', '--help']))
+      .toEqual({ mode: 'profile', profile: 'tui', patches: [], args: ['--', '--help'] })
+  })
+
   it('routes the plugin pnpm forwarder', () => {
     expect(parse(['plugin', '--profile', 'tui', 'add', 'turtle-ui']))
       .toEqual({ mode: 'plugin', profile: 'tui', args: ['add', 'turtle-ui'] })

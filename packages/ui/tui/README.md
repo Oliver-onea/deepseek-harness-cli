@@ -13,13 +13,14 @@ The shipped composition is [`dsh-tui-app`](../../bundle/tui-app/README.md), the 
 | Key | Default | Meaning |
 |---|---|---|
 | `session` | required | The exact `SessionId` of the agent this terminal drives, as the host created it. |
+| `agentWaitTimeoutMs` | `30000` | Maximum time to wait for that agent before refusing startup on the ordinary terminal. |
 | `color` | `true` | Whether to emit SGR sequences; `false` renders the same layout unstyled. |
 | `headLines` | `8` | Lines kept at the head of a folded tool-card body. |
 | `tailLines` | `4` | Lines kept at the tail of a folded tool-card body. |
 | `showReasoning` | `false` | Whether reasoning starts visible; a terminal control toggles it either way. |
 | `task` | — | A first prompt submitted once the screen is up, for `dsh "<task>"`. |
 
-The plugin waits for the agent carrying `session` and enters full-screen mode only after that agent exists, so a failed startup is reported to an ordinary terminal rather than behind an alternate screen. It installs [`installModelSelection`](../../core/agent/README.md) on that agent, which fills the persona's `{{provider}}`/`{{model}}` variables and routes each request.
+The plugin waits for the agent carrying `session`, bounded by `agentWaitTimeoutMs`, and enters full-screen mode only after that agent exists. A missing agent therefore becomes a startup refusal on the ordinary terminal rather than an unbounded wait or a diagnostic behind an alternate screen. It installs [`installModelSelection`](../../core/agent/README.md) on that agent, which fills the persona's `{{provider}}`/`{{model}}` variables and routes each request.
 
 ## What it draws
 

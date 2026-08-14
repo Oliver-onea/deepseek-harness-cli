@@ -104,13 +104,19 @@ async function mount(config: Partial<tui.Config> = {}): Promise<{
 describe('resolveTerminalConfig', () => {
   it('defaults a composition that states only the session', () => {
     expect(tui.resolveTerminalConfig({ session: SESSION }))
-      .toEqual({ color: true, headLines: 8, tailLines: 4, showReasoning: false })
+      .toEqual({
+        color: true,
+        headLines: 8,
+        tailLines: 4,
+        showReasoning: false,
+        agentWaitTimeoutMs: tui.DEFAULT_AGENT_WAIT_TIMEOUT_MS,
+      })
   })
 
   it('keeps every stated setting', () => {
     expect(tui.resolveTerminalConfig({
-      session: SESSION, color: false, headLines: 1, tailLines: 2, showReasoning: true,
-    })).toEqual({ color: false, headLines: 1, tailLines: 2, showReasoning: true })
+      session: SESSION, color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+    })).toEqual({ color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9 })
   })
 })
 
@@ -161,8 +167,29 @@ describe('dsh-tui mounting', () => {
     tui.internals.interactive = () => false
     const ctx = new Context()
     context = ctx
-    expect(() => { tui.apply(ctx, { session: SESSION }) })
+    expect(() => { void tui.apply(ctx, { session: SESSION }) })
       .toThrow('needs a TTY on both stdin and stdout')
+  })
+
+  it('refuses before screen takeover when the configured agent never appears', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+
+    const started = tui.apply(ctx, {
+      session: 'missing-session', color: false, agentWaitTimeoutMs: 1,
+    })
+    await expect(started).rejects.toThrow(
+      'agent for session "missing-session" did not appear within 1ms',
+    )
+    expect(terminal.written).toEqual([])
   })
 
   it('names the pane after the model once the screen is up', async () => {

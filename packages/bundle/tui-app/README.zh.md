@@ -8,15 +8,16 @@ agent 平面保持在 base 放置的位置。这个界面是单会话的，并�
 
 ## 唯一配置的 agent
 
-base 把 `agent-loop` 的 `agents: []` 留给按请求创建会话的界面。本 bundle 恰好配置一个，全新或恢复，由 startup 提供者决定是哪一种：`--resume <session>` 设置 `resumeSessionId`，其他任何启动都在调用目录中铸造一个新的 `sessionId`。agent 行与屏幕行从提供者读取同一个 id，因此二者互不依赖挂载顺序。
+base 把 `agent-loop` 的 `agents: []` 留给按请求创建会话的界面。本 bundle 恰好配置一个，全新或恢复，由 startup 提供者决定是哪一种：`--resume <session>` 会先通过持久化层检查该会话，再发布 `resumeSessionId`；其他任何启动都在调用目录中铸造一个新的 `sessionId`。缺失或不可读的持久日志会在依赖行激活或屏幕进入备用模式前拒绝启动。agent 行与屏幕行从提供者读取同一个 id，因此二者互不依赖挂载顺序。
 
 ## 命令行
 
-普通的 `tui-startup` 提供者（[`src/startup.ts`](src/startup.ts)）注入 `ctx.cmdlineArgs`（[`dsh-cmdline`](../../boot/cmdline/README.md)），解析本应用的标志并提供 `tuiStartup`。由标志配置的行注入该服务，因此 Loader 只在它存在之后才解析这些表达式 —— 而 `dsh --help` 什么都不提供，于是既不组合 agent 也不组合屏幕。
+普通的 `tui-startup` 提供者（[`src/startup.ts`](src/startup.ts)）注入 `ctx.cmdlineArgs`（[`dsh-cmdline`](../../boot/cmdline/README.md)）和 `ctx.sessionPersistence`，解析本应用的标志，验证请求恢复的会话，并提供 `tuiStartup`。由标志配置的行注入该服务，因此 Loader 只在它存在之后才解析这些表达式 —— 而 `dsh --help` 什么都不提供，于是既不组合 agent 也不组合屏幕。
 
 | 参数 | 含义 |
 |---|---|
 | `[task...]` | 首个任务，以空格连接；屏幕打开并从它开始。 |
+| `--` | 结束应用选项解析；后续形似 flag 的 token 会成为任务文本。 |
 | `--resume <session>` | 继续一个已持久化的会话，而不是新建。 |
 | `--model <model>` | 本会话使用的模型 id。 |
 | `--provider <provider>` | 本会话使用的 provider 路由。 |

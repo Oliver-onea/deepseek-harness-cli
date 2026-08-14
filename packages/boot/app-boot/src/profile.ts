@@ -23,6 +23,7 @@
  */
 
 import { createRequire } from 'node:module'
+import { StartupRefusalError } from './errors.ts'
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
@@ -377,7 +378,7 @@ export function loadProfile(
   if (!existsSync(join(dir, 'package.json'))) {
     const template = PROFILE_TEMPLATES[name]
     if (template === undefined) {
-      throw new Error(
+      throw new StartupRefusalError(
         `${binName}: profile ${JSON.stringify(name)} does not exist; create it with 'dsh plugin --profile ${name} add <package>'`,
       )
     }

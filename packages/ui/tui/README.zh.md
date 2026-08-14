@@ -13,13 +13,14 @@
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `session` | 必填 | 该终端驱动的 agent 的确切 `SessionId`，由宿主创建时给出。 |
+| `agentWaitTimeoutMs` | `30000` | 等待该 agent 的最长时间；超时会在普通终端拒绝启动。 |
 | `color` | `true` | 是否输出 SGR 序列；`false` 以相同布局无样式渲染。 |
 | `headLines` | `8` | 折叠工具卡片正文时保留的开头行数。 |
 | `tailLines` | `4` | 折叠工具卡片正文时保留的结尾行数。 |
 | `showReasoning` | `false` | 推理内容初始是否可见；终端控制键可随时切换。 |
 | `task` | — | 屏幕就绪后提交的首个提示，用于 `dsh "<task>"`。 |
 
-插件会等待携带 `session` 的 agent，并且只在该 agent 存在之后才进入全屏模式，因此启动失败会报告到普通终端，而不是被备用屏幕遮住。它在该 agent 上安装 [`installModelSelection`](../../core/agent/README.md)，用于填充 persona 的 `{{provider}}`/`{{model}}` 变量并路由每次请求。
+插件会在 `agentWaitTimeoutMs` 限制内等待携带 `session` 的 agent，并且只在该 agent 存在之后才进入全屏模式。因此，缺失的 agent 会在普通终端上成为启动拒绝，而不是无限等待或藏在备用屏幕后面的诊断。它在该 agent 上安装 [`installModelSelection`](../../core/agent/README.md)，用于填充 persona 的 `{{provider}}`/`{{model}}` 变量并路由每次请求。
 
 ## 它绘制什么
 

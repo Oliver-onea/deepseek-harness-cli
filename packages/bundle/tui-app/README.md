@@ -8,15 +8,16 @@ The agent plane stays where the base put it. This surface is single-session and 
 
 ## The one configured agent
 
-The base leaves `agent-loop`'s `agents: []` for surfaces that create sessions on request. This bundle configures exactly one, fresh or resumed, and the startup provider owns which: `--resume <session>` sets `resumeSessionId`, and any other launch mints a fresh `sessionId` in the invoking directory. Both the agent row and the screen row read the same id from the provider, so neither depends on the other's mount order.
+The base leaves `agent-loop`'s `agents: []` for surfaces that create sessions on request. This bundle configures exactly one, fresh or resumed, and the startup provider owns which: `--resume <session>` inspects that session through persistence before publishing `resumeSessionId`, while any other launch mints a fresh `sessionId` in the invoking directory. A missing or unreadable stored log refuses startup before dependent rows activate or the screen enters alternate mode. Both the agent row and the screen row read the same id from the provider, so neither depends on the other's mount order.
 
 ## Command line
 
-The ordinary `tui-startup` provider ([`src/startup.ts`](src/startup.ts)) injects `ctx.cmdlineArgs` ([`dsh-cmdline`](../../boot/cmdline/README.md)), parses this app's flags, and provides `tuiStartup`. Rows configured from flags inject that service, so the Loader resolves their expressions only after it exists — and `dsh --help` provides nothing, so neither an agent nor a screen is composed.
+The ordinary `tui-startup` provider ([`src/startup.ts`](src/startup.ts)) injects `ctx.cmdlineArgs` ([`dsh-cmdline`](../../boot/cmdline/README.md)) and `ctx.sessionPersistence`, parses this app's flags, verifies a requested resume, and provides `tuiStartup`. Rows configured from flags inject that service, so the Loader resolves their expressions only after it exists — and `dsh --help` provides nothing, so neither an agent nor a screen is composed.
 
 | Argument | Meaning |
 |---|---|
 | `[task...]` | A first task, joined by spaces; the screen opens and starts on it. |
+| `--` | End app option parsing; following flag-shaped tokens are task text. |
 | `--resume <session>` | Continue a persisted session instead of starting a fresh one. |
 | `--model <model>` | Model id for this session. |
 | `--provider <provider>` | Provider route for this session. |

@@ -7,13 +7,37 @@ import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import {
   addHarnessSourceSection, assertEntriesActivated, assertEntriesLoaded, boot,
+  classifyStartupFailure,
   FAIL_LOUD_RELEASE_TIMEOUT_MS, HARNESS_SOURCE_SECTION,
-  installFailLoud, loadEnv, loadLayeredEnv, loadOverlayPatches, resolveConfigPath, type FailLoudProcess,
+  installFailLoud, loadEnv, loadLayeredEnv, loadOverlayPatches, resolveConfigPath,
+  StartupRefusalError, type FailLoudProcess,
 } from '../src/index.ts'
 
 const NAME = 'dsh-test-bin'
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), 'dsh-app-boot-'))
+
+describe('startup failure classification', () => {
+  it('extracts one clean refusal through Loader-style cause wrappers', () => {
+    const refusal = new StartupRefusalError('correct the invocation')
+    const wrapped = new Error('plugin tree failed to load', { cause: new Error('entry failed', { cause: refusal }) })
+    expect(classifyStartupFailure(wrapped)).toEqual({ kind: 'refusal', message: 'correct the invocation' })
+  })
+
+  it('returns an unexpected internal failure unchanged with its stack', () => {
+    const crash = new Error('internal invariant failed')
+    const classified = classifyStartupFailure(crash)
+    expect(classified).toEqual({ kind: 'crash', error: crash })
+    expect(classified.kind === 'crash' && classified.error).toBe(crash)
+    expect(crash.stack).toContain('internal invariant failed')
+  })
+
+  it('does not loop on a circular unmarked cause chain', () => {
+    const crash = new Error('circular')
+    Object.assign(crash, { cause: crash })
+    expect(classifyStartupFailure(crash)).toEqual({ kind: 'crash', error: crash })
+  })
+})
 
 describe('resolveConfigPath', () => {
   it('resolves relative to the given cwd outside replay mode', () => {

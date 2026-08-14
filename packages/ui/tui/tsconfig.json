@@ -33,6 +33,9 @@
       "path": "../../boot/cmdline"
     },
     {
+      "path": "../../boot/app-boot"
+    },
+    {
       "path": "../../interaction/commands"
     },
     {

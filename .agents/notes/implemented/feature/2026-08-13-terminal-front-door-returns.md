@@ -26,7 +26,7 @@ It owns presentation and terminal input. The transcript is folded from the **app
 
 It also owns three pieces of agent-scoped state, each because no other row in a single-session composition can: the `userQuestions` provider, an `approval/request` answerer scoped to its own agent (every other agent's question delegates to the rest of the chain), and the model-selection ref that fills the persona's `{{provider}}`/`{{model}}` variables and routes each request. `agent-loop` does not install that ref for configured agents — the entry point does, as `dsh-headless` and the Web host already did.
 
-It requires both stdin and stdout to be TTYs and throws at mount rather than degrading, and it takes the screen only after the agent it names exists, so a failed startup is reported to an ordinary terminal.
+It requires both stdin and stdout to be TTYs and throws a typed startup refusal at mount rather than degrading. The startup provider inspects a requested resume through session persistence before publishing its service, and the renderer waits for the named agent only up to its validated `agentWaitTimeoutMs`; both checks finish before alternate-screen entry, so a missing or unreadable session and a broken agent composition report to the ordinary terminal.
 
 ### Terminal ownership
 
@@ -42,7 +42,7 @@ The palette is standard 16-color ANSI foregrounds and SGR attributes with body t
 
 Package suites hold per-file 100% coverage over the fold, the card renderer, the footer, the question panel, the approval answerer, and the plugin, driving the real plugin against a substituted `Terminal` and a real `SessionStore` so appends publish `session/event` exactly as in production.
 
-One PTY test is sanctioned because the subject IS the terminal takeover, which pipes cannot prove ([the testing policy that reserves PTY for this case](../../archived/simplification/2026-07-20-retire-readline-front-door.md)): `packages/ui/tui/tests/pty-boot.spec.ts` boots the shipped `tui` profile through the `dsh` launcher against the keyless mock model, submits a prompt, waits for the answer on screen, and leaves through `/exit` with exit code 0.
+PTY coverage is sanctioned because the subject IS terminal takeover, which pipes cannot prove ([the testing policy that reserves PTY for this case](../../archived/simplification/2026-07-20-retire-readline-front-door.md)): `packages/ui/tui/tests/pty-boot.spec.ts` boots the shipped `tui` profile through the `dsh` launcher against the keyless mock model, submits a prompt, waits for the answer on screen, and leaves through `/exit` with exit code 0. The same real composition proves that redirected stdin or stdout receives one refusal line, and that missing or corrupt resume logs fail before the alternate screen is entered.
 
 ## Alternatives considered
 
@@ -58,6 +58,6 @@ One PTY test is sanctioned because the subject IS the terminal takeover, which p
 
 `dsh` with no arguments opens a terminal conversation, and `dsh "<task>"` starts one on that task. Web remains the shipped browser surface and headless remains the one-shot automation entry; nothing about either changed.
 
-Deployments composing `dsh-tui` must supply a TTY and a `ctx.appExit`, and must name the session id of an agent their own composition creates. A composition without `ctx.commands` still works — the editor sends every line to the model, and `/exit` is unavailable, leaving `ctrl+c` as the way out.
+Deployments composing `dsh-tui` must supply a TTY and a `ctx.appExit`, must name the session id of an agent their own composition creates, and may set `agentWaitTimeoutMs` when their startup latency differs from the 30-second default. A composition without `ctx.commands` still works — the editor sends every line to the model, and `/exit` is unavailable, leaving `ctrl+c` as the way out.
 
 A terminal model picker now has a place to write: the model-selection ref is installed and owned by this front door, but no command exposes it yet.
