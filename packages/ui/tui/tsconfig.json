@@ -39,6 +39,9 @@
       "path": "../../interaction/commands"
     },
     {
+      "path": "../../interaction/permission-presets"
+    },
+    {
       "path": "../../interaction/user-approval"
     },
     {
@@ -46,6 +49,12 @@
     },
     {
       "path": "../../llm/llm"
+    },
+    {
+      "path": "../../goal/goal"
+    },
+    {
+      "path": "../../plan/plan-mode"
     },
     {
       "path": "../../llm/token-meter"

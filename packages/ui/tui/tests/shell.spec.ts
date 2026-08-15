@@ -62,7 +62,13 @@ function fakeAgent(status: 'idle' | 'running' = 'idle'): AgentStub {
 
 const presenter: ToolPresenter = { presentCall: () => undefined, presentResult: () => undefined }
 
-function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime } = {}): {
+interface StateReaders {
+  goal?: () => { objective: string; phase: string } | undefined
+  planMode?: () => { active: boolean; pending?: boolean }
+  permissionPreset?: () => string | undefined
+}
+
+function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime; state?: StateReaders } = {}): {
   shell: TerminalShell
   tui: ReturnType<typeof fakeTui>
   agent: AgentStub
@@ -76,6 +82,9 @@ function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime } = {}): 
     presenter,
     commands: over.commands,
     tokenMeter: undefined,
+    goal: over.state?.goal,
+    planMode: over.state?.planMode,
+    permissionPreset: over.state?.permissionPreset,
     headLines: 4,
     tailLines: 2,
     showReasoning: false,
@@ -319,5 +328,41 @@ describe('TerminalShell', () => {
     })
     shell.refreshStatus()
     expect(measure).toHaveBeenCalled()
+  })
+
+  it('shows session-state indicators in the footer when readers supply them', () => {
+    const { shell, tui } = shellFor({
+      state: {
+        goal: () => ({ objective: 'ship it', phase: 'active' }),
+        planMode: () => ({ active: true }),
+        permissionPreset: () => 'workspace-write',
+      },
+    })
+    shell.start()
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).toContain('goal: ship it')
+    expect(drawn).toContain('plan')
+    expect(drawn).toContain('workspace-write')
+  })
+
+  it('hides session-state indicators when readers are absent', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).not.toContain('goal:')
+    expect(drawn).not.toContain('plan')
+    expect(drawn).not.toContain('workspace-write')
+  })
+
+  it('reflects changing goal state without a new session event', () => {
+    let goal: { objective: string; phase: string } | undefined = { objective: 'first', phase: 'active' }
+    const { shell, tui } = shellFor({ state: { goal: () => goal } })
+    shell.start()
+    const before = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(before).toContain('goal: first')
+    goal = undefined
+    shell.refreshStatus()
+    const after = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(after).not.toContain('goal:')
   })
 })

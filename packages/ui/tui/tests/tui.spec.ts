@@ -12,6 +12,9 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import Commands from '@deepseek-ai/dsh-commands'
 import UserApproval from '@deepseek-ai/dsh-user-approval'
 import UserQuestions from '@deepseek-ai/dsh-user-questions'
+import GoalService from '@deepseek-ai/dsh-goal'
+import PlanModeController from '@deepseek-ai/dsh-plan-mode'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import * as tui from '../src/index.ts'
 
 const SESSION = 'session-tui-plugin'
@@ -407,6 +410,34 @@ describe('dsh-tui mounting', () => {
     await ctx.plugin(tui, { session: 'session-never-created', color: false })
     await expect(ctx.fiber.dispose()).resolves.not.toThrow()
     context = undefined
+  })
+
+  it('shows goal, plan mode, and permission preset from composed services', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestions)
+    await ctx.plugin(GoalService)
+    await ctx.plugin(PlanModeController, { section: 'test plan guidance' })
+    ctx.provide('permissionPresets', { current: () => 'workspace-write' } as never)
+    const agent = registerAgent(ctx)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    ctx.goals.create(agent, { objective: 'ship the feature' })
+    ctx.planMode.set(agent, true)
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(screen(terminal)).toContain('goal: ship the feature')
+    expect(screen(terminal)).toContain('plan')
+    expect(screen(terminal)).toContain('workspace-write')
   })
 })
 

@@ -24,6 +24,9 @@ import type {} from '@deepseek-ai/cordis-plugin-timer'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-goal'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-plan-mode'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { installApprovalAnswerer } from './approval.ts'
 import { TerminalQuestions } from './questions.ts'
@@ -273,6 +276,9 @@ async function start(ctx: Context, config: Config): Promise<void> {
   installModelSelection(agent.ctx, selection)
   const terminal = internals.createTerminal()
   const tui: ViewportTUI = new TuiAltScreen(terminal)
+  const goals = ctx.get('goals')
+  const planMode = ctx.get('planMode')
+  const permissionPresets = ctx.get('permissionPresets')
   const shell = new TerminalShell({
     tui,
     agent,
@@ -280,6 +286,16 @@ async function start(ctx: Context, config: Config): Promise<void> {
     presenter: createPresenter(ctx, agent),
     commands: ctx.get('commands'),
     tokenMeter: ctx.get('tokenMeter'),
+    goal: goals === undefined ? undefined : () => {
+      const view = goals.get(agent)
+      return view === undefined || view.phase === 'complete'
+        ? undefined
+        : { objective: view.objective, phase: view.phase }
+    },
+    planMode: planMode === undefined ? undefined : () => planMode.get(agent),
+    permissionPreset: permissionPresets === undefined
+      ? undefined
+      : () => permissionPresets.current(agent.session.events),
     headLines: settings.headLines,
     tailLines: settings.tailLines,
     showReasoning: settings.showReasoning,

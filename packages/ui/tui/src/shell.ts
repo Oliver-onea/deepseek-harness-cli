@@ -22,6 +22,7 @@ import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { displayLine } from './display-text.ts'
 import type { PanelHost } from './questions.ts'
 import { renderStatus } from './status.ts'
+import type { StatusGoal, StatusPlanMode } from './status.ts'
 import type { Palette } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { TranscriptView, type ToolPresenter } from './view.ts'
@@ -40,6 +41,12 @@ export interface ShellOptions {
   commands: CommandRuntime | undefined
   /** The token meter behind the context field, when the composition mounts one. */
   tokenMeter: TokenMeter | undefined
+  /** Read the current goal, when the composition mounts a goal service. */
+  goal?: (() => StatusGoal | undefined) | undefined
+  /** Read plan-mode state, when the composition mounts plan mode. */
+  planMode?: (() => StatusPlanMode) | undefined
+  /** Read the effective permission preset, when the composition mounts permission presets. */
+  permissionPreset?: (() => string | undefined) | undefined
   /** Lines kept at the head of a folded tool-card body. */
   headLines: number
   /** Lines kept at the tail of a folded tool-card body. */
@@ -166,6 +173,9 @@ export class TerminalShell implements PanelHost {
       contextWindow: this.contextWindow,
       queued: agent.inbox.nextTurn.length + agent.inbox.nextStep.length,
       todos: this.transcript.todos,
+      goal: this.options.goal?.(),
+      planMode: this.options.planMode?.(),
+      permissionPreset: this.options.permissionPreset?.(),
     }, this.options.palette))
     this.options.tui.requestRender()
   }

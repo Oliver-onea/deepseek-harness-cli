@@ -8,6 +8,22 @@ import type { TodoItem } from '@deepseek-ai/dsh-session'
 import { displayLine } from './display-text.ts'
 import type { Palette } from './theme.ts'
 
+/** A standing goal the reader set for this session. */
+export interface StatusGoal {
+  /** The goal objective, already normalized for the terminal. */
+  objective: string
+  /** The durable goal phase; the terminal hides completed goals. */
+  phase: string
+}
+
+/** Plan-mode state as the terminal footer reads it. */
+export interface StatusPlanMode {
+  /** Whether plan mode is in force at the last committed step. */
+  active: boolean
+  /** Whether a logged /plan selection is waiting for the next accepted pre-step. */
+  pending?: boolean
+}
+
 /** Everything the footer reports. */
 export interface StatusInput {
   /** Whether a driver is currently running a turn. */
@@ -26,6 +42,12 @@ export interface StatusInput {
   queued: number
   /** The latest written plan. */
   todos: readonly TodoItem[]
+  /** The current session goal, when one is set and not complete. */
+  goal?: StatusGoal | undefined
+  /** Plan-mode state, when the composition mounts plan mode. */
+  planMode?: StatusPlanMode | undefined
+  /** The effective permission preset, when the composition mounts permission presets. */
+  permissionPreset?: string | undefined
 }
 
 /** Milliseconds in one second, for the elapsed-time field. */
@@ -83,6 +105,36 @@ export function formatPlan(todos: readonly TodoItem[]): string | undefined {
   return active === undefined ? counts : `${counts} — ${displayLine(active.content)}`
 }
 
+/** Maximum objective length in the goal footer field; excess is truncated. */
+const MAX_GOAL_OBJECTIVE_LENGTH = 40
+
+/**
+ * Summarize a standing goal for the footer. Non-active phases are named so a
+ * paused or blocked goal does not read as idle work.
+ * @param goal - the current session goal.
+ * @returns the goal field.
+ */
+export function formatGoal(goal: StatusGoal): string {
+  const prefix = goal.phase === 'active' ? 'goal' : `goal ${goal.phase}`
+  const objective = goal.objective.length > MAX_GOAL_OBJECTIVE_LENGTH
+    ? `${goal.objective.slice(0, MAX_GOAL_OBJECTIVE_LENGTH)}…`
+    : goal.objective
+  return `${prefix}: ${displayLine(objective)}`
+}
+
+/**
+ * Summarize plan-mode state for the footer. The effective target folds a
+ * pending /plan selection into the committed state, matching the web chip.
+ * @param planMode - the current plan-mode state.
+ * @returns the plan field, or `undefined` when plan mode is off and not pending.
+ */
+export function formatPlanMode(planMode: StatusPlanMode): string | undefined {
+  const effective = planMode.pending ?? planMode.active
+  if (!effective) return undefined
+  const transitioning = planMode.pending !== undefined && planMode.pending !== planMode.active
+  return transitioning ? 'plan*' : 'plan'
+}
+
 /**
  * Compose the footer line.
  * @param input - the current session state.
@@ -94,6 +146,10 @@ export function renderStatus(input: StatusInput, palette: Palette): string {
   fields.push(input.running
     ? palette.warn(`working ${formatElapsed(input.elapsedMs)}`)
     : palette.success('ready'))
+  if (input.goal !== undefined) fields.push(palette.dim(formatGoal(input.goal)))
+  const planMode = input.planMode === undefined ? undefined : formatPlanMode(input.planMode)
+  if (planMode !== undefined) fields.push(palette.warn(planMode))
+  if (input.permissionPreset !== undefined) fields.push(palette.dim(input.permissionPreset))
   fields.push(palette.dim(`${displayLine(input.provider)}/${displayLine(input.model)}`))
   fields.push(palette.dim(formatContext(input.tokens, input.contextWindow)))
   const plan = formatPlan(input.todos)

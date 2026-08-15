@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatContext, formatElapsed, formatPlan, formatTokens, renderStatus } from '../src/status.ts'
+import { formatContext, formatElapsed, formatGoal, formatPlan, formatPlanMode, formatTokens, renderStatus } from '../src/status.ts'
 import type { StatusInput } from '../src/status.ts'
 import { createPalette } from '../src/theme.ts'
 
@@ -70,6 +70,40 @@ describe('formatPlan', () => {
   })
 })
 
+describe('formatGoal', () => {
+  it('renders an active goal with its objective', () => {
+    expect(formatGoal({ objective: 'fix the bug', phase: 'active' })).toBe('goal: fix the bug')
+  })
+
+  it('names paused and blocked phases', () => {
+    expect(formatGoal({ objective: 'refactor', phase: 'paused' })).toBe('goal paused: refactor')
+    expect(formatGoal({ objective: 'deploy', phase: 'blocked' })).toBe('goal blocked: deploy')
+  })
+
+  it('truncates a long objective and escapes control characters', () => {
+    const long = 'a'.repeat(100)
+    expect(formatGoal({ objective: long, phase: 'active' }))
+      .toBe(`goal: ${'a'.repeat(40)}…`)
+    expect(formatGoal({ objective: 'fix\x1b[31m', phase: 'active' }))
+      .toBe('goal: fix\\x1b[31m')
+  })
+})
+
+describe('formatPlanMode', () => {
+  it('is absent when plan mode is off', () => {
+    expect(formatPlanMode({ active: false })).toBeUndefined()
+  })
+
+  it('shows plan when active', () => {
+    expect(formatPlanMode({ active: true })).toBe('plan')
+  })
+
+  it('shows plan while entering and hides while leaving', () => {
+    expect(formatPlanMode({ active: false, pending: true })).toBe('plan*')
+    expect(formatPlanMode({ active: true, pending: false })).toBeUndefined()
+  })
+})
+
 describe('renderStatus', () => {
   it('reads as ready with the route and the exit hint while idle', () => {
     expect(renderStatus(idle, plain))
@@ -93,5 +127,24 @@ describe('renderStatus', () => {
 
   it('styles the same fields when the palette has color', () => {
     expect(renderStatus(idle, createPalette(true))).toContain('\x1b[32mready\x1b[39m')
+  })
+
+  it('shows goal, plan mode, and permission preset when present', () => {
+    const status = renderStatus({
+      ...idle,
+      goal: { objective: 'ship it', phase: 'active' },
+      planMode: { active: true },
+      permissionPreset: 'workspace-write',
+    }, plain)
+    expect(status).toContain('goal: ship it')
+    expect(status).toContain('plan')
+    expect(status).toContain('workspace-write')
+  })
+
+  it('omits absent session-state indicators', () => {
+    const status = renderStatus(idle, plain)
+    expect(status).not.toContain('goal:')
+    expect(status).not.toContain('plan')
+    expect(status).not.toContain('workspace-write')
   })
 })

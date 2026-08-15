@@ -28,7 +28,7 @@ The transcript is folded from the **append-origin session log**, not from the mo
 
 Tool cards come from each tool's own `presentCall`/`presentResult` ([render intent](../../core/tools/README.md)): terminal, diff, read, search, and web cards each have a terminal form, and a card shape this renderer does not know falls back to the model-facing result. A tool changes how it reads here by changing its presenter, never by a branch in this package.
 
-The footer reports run state, the route requests actually use (from the latest `request/context`), context occupancy from [`ctx.tokenMeter`](../../llm/token-meter/README.md), the latest `todo/write` plan, queued inbox depth, and the controls that currently apply.
+The footer reports run state, the route requests actually use (from the latest `request/context`), context occupancy from [`ctx.tokenMeter`](../../llm/token-meter/README.md), the latest `todo/write` plan, queued inbox depth, the controls that currently apply, and standing session-state indicators when the composition mounts them: the current goal (except completed goals), an active or pending plan mode, and the effective permission preset.
 
 ## Terminal ownership
 
@@ -65,3 +65,4 @@ No direct invalidation. The installed model selection is fixed for the session's
 - **No terminal model picker yet** — the model-selection ref this package installs is where one would write, but no command exposes it; `--model`/`--provider` at launch is the only selection.
 - **Streaming granularity is the log's** — the transcript follows `assistant/chunk` events, so a composition that logs no chunks draws each step's text when its message commits.
 - **Images are not rendered** — pi-tui can place inline images in capable terminals, but attachment blocks currently contribute no terminal output.
+- **No command/skill autocomplete** — typing `/` or `@` does not yet offer the candidate menu the web surface shows; the current goal, plan mode, and permission preset are the only standing terminal indicators.
