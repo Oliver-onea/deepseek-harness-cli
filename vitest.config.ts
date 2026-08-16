@@ -114,6 +114,7 @@ const processBoundTests = [
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
   // PTY takeover of a real terminal: the one subject pipes cannot prove.
   'packages/ui/tui/tests/pty-boot.spec.ts',
+  'apps/cli/tests/tui-interaction.spec.ts',
 ]
 
 export default defineConfig({

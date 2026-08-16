@@ -730,7 +730,8 @@
       "entry": [
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts",
-        "tests/**/*.snapshot.ts"
+        "tests/**/*.snapshot.ts",
+        "tests/**/*.harness.ts"
       ],
       "project": [
         "src/**/*.ts",
