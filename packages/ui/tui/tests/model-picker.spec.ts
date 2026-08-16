@@ -642,6 +642,15 @@ describe('runModelCommand', () => {
     expect(ui.onApplied).toHaveBeenCalledWith('deepseek-official', 'deepseek-reasoner')
   })
 
+  it('stringifies a default-save rejection that is not an Error', async () => {
+    const persist = vi.fn().mockImplementation(() => Promise.reject('disk gone' as never))
+    const ui = await uiFor({ persist })
+    await expect(runModelCommand(ui, 'deepseek-reasoner')).resolves.toEqual({
+      kind: 'success',
+      text: 'Model switched to deepseek-official/deepseek-reasoner (reasoning high); not saved as the default: disk gone',
+    })
+  })
+
   it('switches without persistence when the composition mounts no default-model service', async () => {
     const ui = await uiFor({ persist: undefined })
     await expect(runModelCommand(ui, 'deepseek-reasoner')).resolves.toEqual({
