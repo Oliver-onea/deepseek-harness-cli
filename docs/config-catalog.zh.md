@@ -2821,10 +2821,17 @@ export interface Config {
   task?: string
   /** Maximum time to wait for the configured agent before refusing startup. */
   agentWaitTimeoutMs?: number
+  /** Candidate rows the `/` and `@` menus show before scrolling. */
+  maxSuggestions?: number
+  /**
+   * File-finder binary backing fuzzy `@` search. Unset searches `PATH` for
+   * `fd` (then `fdfind`); an explicit path that does not exist refuses startup.
+   */
+  fileFinderPath?: string
 }
 ```
 
-来源：[`packages/ui/tui/src/index.ts:63`](../packages/ui/tui/src/index.ts)
+来源：[`packages/ui/tui/src/index.ts:68`](../packages/ui/tui/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 

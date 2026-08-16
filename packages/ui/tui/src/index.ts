@@ -29,6 +29,8 @@ import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-plan-mode'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { installApprovalAnswerer } from './approval.ts'
+import { resolveFileFinder } from './autocomplete.ts'
+import { helpText } from './command-help.ts'
 import { TerminalQuestions } from './questions.ts'
 import { createPalette } from './theme.ts'
 import { TerminalShell, paneTitle } from './shell.ts'
@@ -56,6 +58,9 @@ const DEFAULT_HEAD_LINES = 8
 /** Lines kept at the tail of a folded tool-card body when nothing states otherwise. */
 const DEFAULT_TAIL_LINES = 4
 
+/** Candidate rows the input-trigger menus show before scrolling, by default. */
+const DEFAULT_MAX_SUGGESTIONS = 8
+
 /** Default bound for waiting on the composition's configured agent. */
 export const DEFAULT_AGENT_WAIT_TIMEOUT_MS = 30_000
 
@@ -75,6 +80,13 @@ export interface Config {
   task?: string
   /** Maximum time to wait for the configured agent before refusing startup. */
   agentWaitTimeoutMs?: number
+  /** Candidate rows the `/` and `@` menus show before scrolling. */
+  maxSuggestions?: number
+  /**
+   * File-finder binary backing fuzzy `@` search. Unset searches `PATH` for
+   * `fd` (then `fdfind`); an explicit path that does not exist refuses startup.
+   */
+  fileFinderPath?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -85,6 +97,8 @@ export const Config: z<Config> = z.object({
   showReasoning: z.boolean().default(false),
   task: z.string(),
   agentWaitTimeoutMs: z.number().step(1).min(1).default(DEFAULT_AGENT_WAIT_TIMEOUT_MS),
+  maxSuggestions: z.natural().min(1).default(DEFAULT_MAX_SUGGESTIONS),
+  fileFinderPath: z.string(),
 })
 
 /** The terminal settings after defaulting: what {@link TerminalShell} reads. */
@@ -99,6 +113,10 @@ export interface ResolvedConfig {
   showReasoning: boolean
   /** Maximum time to wait for the configured agent. */
   agentWaitTimeoutMs: number
+  /** Candidate rows the `/` and `@` menus show before scrolling. */
+  maxSuggestions: number
+  /** File-finder binary behind fuzzy `@` search; `null` when none is available. */
+  fileFinderPath: string | null
 }
 
 /**
@@ -116,6 +134,8 @@ export function resolveTerminalConfig(config: Config): ResolvedConfig {
     tailLines: config.tailLines ?? DEFAULT_TAIL_LINES,
     showReasoning: config.showReasoning ?? false,
     agentWaitTimeoutMs: config.agentWaitTimeoutMs ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS,
+    maxSuggestions: config.maxSuggestions ?? DEFAULT_MAX_SUGGESTIONS,
+    fileFinderPath: resolveFileFinder(config.fileFinderPath),
   }
 }
 
@@ -279,12 +299,13 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const goals = ctx.get('goals')
   const planMode = ctx.get('planMode')
   const permissionPresets = ctx.get('permissionPresets')
+  const commands = ctx.get('commands')
   const shell = new TerminalShell({
     tui,
     agent,
     palette,
     presenter: createPresenter(ctx, agent),
-    commands: ctx.get('commands'),
+    commands,
     tokenMeter: ctx.get('tokenMeter'),
     goal: goals === undefined ? undefined : () => {
       const view = goals.get(agent)
@@ -300,6 +321,12 @@ async function start(ctx: Context, config: Config): Promise<void> {
     tailLines: settings.tailLines,
     showReasoning: settings.showReasoning,
     defaultRoute,
+    autocomplete: {
+      commands: commands === undefined ? () => [] : () => commands.list(agent),
+      workspacePath: process.cwd(),
+      fileFinderPath: settings.fileFinderPath,
+      maxVisible: settings.maxSuggestions,
+    },
   })
 
   ctx.effect(function* () {
@@ -345,6 +372,14 @@ async function start(ctx: Context, config: Config): Promise<void> {
         },
       })
     }
+    scope.commands.register({
+      name: 'help',
+      description: 'List the commands this terminal resolves',
+      handler: ({ agent: receiving }) => ({
+        kind: 'success',
+        text: helpText(scope.commands.list(receiving)),
+      }),
+    })
   })
 
   tui.addInputListener((data: string) => {

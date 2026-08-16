@@ -18,6 +18,8 @@ The shipped composition is [`dsh-tui-app`](../../bundle/tui-app/README.md), the 
 | `headLines` | `8` | Lines kept at the head of a folded tool-card body. |
 | `tailLines` | `4` | Lines kept at the tail of a folded tool-card body. |
 | `showReasoning` | `false` | Whether reasoning starts visible; a terminal control toggles it either way. |
+| `maxSuggestions` | `8` | Candidate rows the `/` and `@` menus show before scrolling; a small terminal shows fewer. |
+| `fileFinderPath` | — | File-finder binary behind fuzzy `@` search. Unset searches `PATH` for `fd` then `fdfind`; a stated path that does not exist refuses startup. Without a finder, `@` offers nothing. |
 | `task` | — | A first prompt submitted once the screen is up, for `dsh "<task>"`. |
 
 The plugin waits for the agent carrying `session`, bounded by `agentWaitTimeoutMs`, and enters full-screen mode only after that agent exists. A missing agent therefore becomes a startup refusal on the ordinary terminal rather than an unbounded wait or a diagnostic behind an alternate screen. It installs [`installModelSelection`](../../core/agent/README.md) on that agent, which fills the persona's `{{provider}}`/`{{model}}` variables and routes each request.
@@ -30,6 +32,8 @@ Tool cards come from each tool's own `presentCall`/`presentResult` ([render inte
 
 The footer reports run state, the route requests actually use (from the latest `request/context`), context occupancy from [`ctx.tokenMeter`](../../llm/token-meter/README.md), the latest `todo/write` plan, queued inbox depth, the controls that currently apply, and standing session-state indicators when the composition mounts them: the current goal (except completed goals), an active or pending plan mode, and the effective permission preset.
 
+Under the caret, the editor offers two input-trigger menus built on pi-tui's autocomplete: typing `/` at the start of the input lists the commands the live [`ctx.commands`](../../interaction/commands/README.md) registry resolves for this agent — a command registered after the screen is up appears on the next keystroke — and typing `@` lists workspace files under the working directory through the configured file finder. Both draw inside the editor block, one candidate per row with its description, and both give way before anything else on a small terminal: the menus clamp to the rows the footer, the editor, and one transcript row leave free, and a terminal with no room for a candidate row shows no menu at all. A picked `/` candidate completes to the command line and submits through the registry; a picked `@` candidate inserts the file's path as reference text in the input.
+
 ## Terminal ownership
 
 Every string reaching pi-tui or the pane title passes through `displayText()`, which collapses carriage returns, expands tabs, and renders every other C0/DEL/C1 control as a visible `\xNN` escape. Only this package and pi-tui create ANSI control sequences, so untrusted tool output or model text cannot repaint the screen, move the cursor, or set the pane title.
@@ -41,11 +45,16 @@ The palette uses standard 16-color ANSI foregrounds and SGR attributes and keeps
 | Key | Effect |
 |---|---|
 | `enter` | Submit: a resolved slash command runs through [`ctx.commands`](../../interaction/commands/README.md); anything else reaches the agent — a follow-up turn while idle, steering while a turn runs. |
-| `esc` | Cancel the running turn. |
+| `esc` | Dismiss the open menu; otherwise cancel the running turn. |
 | `ctrl+c` | Cancel a running turn; with nothing to cancel, leave the session. |
 | `ctrl+r` | Show or hide reasoning. |
 | `ctrl+o` | Expand or fold every tool-card body. |
+| `/` | Open the command menu at the start of the input; letters narrow it. |
+| `@` | Open the workspace-file menu at a word boundary; letters narrow it. |
+| `up` / `down` | Move the open menu's selection. |
+| `tab` | Complete the selected candidate and keep typing. |
 | `/exit`, `/quit` | Leave: cancel any turn, wait for the agent to settle so its session flushes, then exit. |
+| `/help` | List the commands the live registry resolves for this agent; the footer's hint names it. |
 
 ## Interaction
 
@@ -65,4 +74,6 @@ No direct invalidation. The installed model selection is fixed for the session's
 - **No terminal model picker yet** — the model-selection ref this package installs is where one would write, but no command exposes it; `--model`/`--provider` at launch is the only selection.
 - **Streaming granularity is the log's** — the transcript follows `assistant/chunk` events, so a composition that logs no chunks draws each step's text when its message commits.
 - **Images are not rendered** — pi-tui can place inline images in capable terminals, but attachment blocks currently contribute no terminal output.
-- **No command/skill autocomplete** — typing `/` or `@` does not yet offer the candidate menu the web surface shows; the current goal, plan mode, and permission preset are the only standing terminal indicators.
+- **`@` picks are plain reference text** — the terminal has no reference or attachment pipeline, so a picked file inserts its path into the input and rides the prompt exactly as typed; there is no chip, no attachment block, and no separate model serialization.
+- **`@` search needs a file finder** — the fuzzy workspace search spawns `fd` (or `fdfind`); without one, `@` offers no candidates and path completion still works through `tab`.
+- **No skill trigger** — the web surface also offers skills under a trigger; this terminal composes no skill source, so only `/` and `@` have menus.

@@ -12,11 +12,11 @@ Seven commands resolve in a shipped terminal session — `/compact`, `/exit`, `/
 
 Typing `/` or `@` does nothing. The web surface detects both under the caret and offers a grouped candidate menu ([`ui-input-trigger`](../../../../packages/client/ui-input-trigger/README.md)), which is how a reader discovers commands, skills, and file references without reading documentation. In the terminal, discovery has no entry point at all.
 
-The terminal already depends on a framework that ships most of the missing mechanics. `dsh-tui` imports `Editor`, `ScrollView`, `Text`, `VStack`, `Markdown`, `TuiAltScreen`, `ProcessTerminal`, `matchesKey`, and `wrapTextWithAnsi` from `@earendil-works/pi-tui`. It imports none of `AutocompleteProvider`, `AutocompleteItem`, `AutocompleteSuggestions`, `SelectList`, `SettingsList`, `Loader`, or `Image`, though the package exports all of them and documents autocomplete over both file paths and slash commands.
+The terminal already depends on a framework that ships most of the missing mechanics. `dsh-tui` imports `Editor`, `ScrollView`, `Text`, `VStack`, `Markdown`, `TuiAltScreen`, `ProcessTerminal`, `matchesKey`, and `wrapTextWithAnsi` from `@earendil-works/pi-tui`. The `Editor` carries a complete autocomplete — provider-driven suggestions, debounced queries, keyboard arbitration, and an in-editor candidate list styled through the theme the shell already passes — so the input triggers need no second menu implementation; `SelectList`, `SettingsList`, `Loader`, and `Image` remain unimported and belong to Tier C surfaces.
 
 ## Decision
 
-DeepSeek Harness ships terminal parity with the web surface in three independently shippable tiers. **Tier A is implemented**: the terminal footer now surfaces the current goal, plan mode, and permission preset without requiring the reader to run a command. **Tier B and Tier C are deferred** and recorded below.
+DeepSeek Harness ships terminal parity with the web surface in three independently shippable tiers. **Tier A and Tier B are implemented**; **Tier C is deferred** and recorded below.
 
 ### Tier A — surface what already resolves
 
@@ -27,6 +27,18 @@ The terminal footer reads standing session state from the services that already 
 - [`@deepseek-ai/dsh-permission-presets`](../../../../packages/interaction/permission-presets/README.md) supplies the effective preset name, including the derived `custom` state.
 
 [`dsh-tui`](../../../../packages/ui/tui/README.md) resolves each service through `ctx.get()` and passes a reader closure to `TerminalShell`. The readers are optional, so a composition without goal, plan-mode, or permission-presets simply omits the matching indicator. The footer continues to route every displayed string through `displayText()`, so untrusted model or tool text cannot repaint the screen through the new path.
+
+### Tier B — the input trigger pipeline
+
+The editor offers the two trigger menus on pi-tui's autocomplete (`CombinedAutocompleteProvider` under a thin wrapper, [`autocomplete.ts`](../../../../packages/ui/tui/src/autocomplete.ts)):
+
+- `/` at the start of the input lists the commands the **live** [`ctx.commands`](../../../../packages/interaction/commands/README.md) registry resolves for the driven agent. The wrapper reads `commands.list(agent)` on every query, so a command registered after the screen is up appears on the next keystroke and a shadowed one disappears, without a restart.
+- `@` at a word boundary lists workspace files under the working directory through the `fd`/`fdfind` binary (configurable as `fileFinderPath`; no finder means no `@` candidates).
+- Candidate labels and descriptions pass through `displayLine()` before the editor draws them; the completion value stays literal so the pick inserts exactly what was found.
+- `/help` is a real command, registered beside `exit`/`quit`, whose text lists the live registry — the footer's `/help` hint names a command that resolves, and running it opens no model turn.
+- A picked `/` candidate completes to the command line and submits through the registry, so it never reaches the model; a picked `@` candidate inserts the file's path as plain reference text that rides the prompt — the web surface's plain-text pick arm. The terminal has no reference or attachment pipeline (no U+FFFC placeholder, no per-source codec); that machinery belongs to a future attachment capability, and silently downgrading a pick to nothing would be worse than honest path text.
+
+Degradation: the menus clamp to the rows the footer, the editor, and one transcript row leave free (`menuRowsFor`), and a terminal with no room for a candidate row — the stress-tested 20x5 — shows no menu at all. `maxSuggestions` bounds the rows before that clamp; the palette renders both menus, so `color: false` draws the same layout unstyled.
 
 ### What parity does not mean
 
@@ -44,16 +56,18 @@ Terminal parity is capability parity, not layout parity. The web surface compose
 
 The `dsh-tui` package gained optional peer dependencies on `@deepseek-ai/dsh-goal`, `@deepseek-ai/dsh-plan-mode`, and `@deepseek-ai/dsh-permission-presets` so the footer can read authoritative state without re-folding session events. A terminal session now shows the current goal, plan mode, and permission preset when those services are composed, and each indicator disappears when its state is absent. The existing footer fields (run state, route, context occupancy, todo plan, queued depth, controls) keep their previous positions after the new indicators.
 
-The terminal has one viewport, and every indicator competes with the transcript for rows. Tier A mitigates this by omitting completed goals, truncating long objectives, and hiding each indicator when its state is absent; Tier B and Tier C will need their own degradation rules for the stress-tested 20x5 case.
+The terminal has one viewport, and every indicator competes with the transcript for rows. Tier A mitigates this by omitting completed goals, truncating long objectives, and hiding each indicator when its state is absent; Tier B's menus clamp to the rows the footer, the editor, and one transcript row leave free, and yield entirely on a terminal too small for one candidate row; Tier C will need its own degradation rules for the stress-tested 20x5 case.
+
+The `/` menu lists commands grouped only by the registry's name order, without the web surface's source-grouped headings; a skill source would register its own candidates, but no terminal composition mounts one yet.
 
 ## Verification
 
 - `packages/ui/tui/tests/status.spec.ts` covers formatting for goal, plan mode, and permission preset, including omission when absent.
-- `packages/ui/tui/tests/shell.spec.ts` covers footer updates from the new readers and hides indicators when readers are absent.
-- `packages/ui/tui/tests/tui.spec.ts` mounts the plugin with real `dsh-goal` and `dsh-plan-mode` services plus a permission-preset reader and asserts the footer reflects live service state.
+- `packages/ui/tui/tests/shell.spec.ts` covers footer updates from the new readers, hides indicators when readers are absent, and drives the input-trigger menus end to end: live-roster offering and narrowing, escape dismissal, keyboard selection and tab completion, the `@` file pick, slash-pick submission through the registry, small-terminal clamping and suppression, and identical menu layout with `color` off.
+- `packages/ui/tui/tests/tui.spec.ts` mounts the plugin with real `dsh-goal` and `dsh-plan-mode` services plus a permission-preset reader and asserts the footer reflects live service state; it also proves `/help` answers from the live registry with no `user/message` or `turn/start` event, lists a command registered after mounting, and that disposing the plugin fiber removes every terminal-owned command.
+- `packages/ui/tui/tests/autocomplete.spec.ts` covers candidate derivation and normalization, the row budget, live-roster reads, delegate completion semantics, `@` search through the real file finder, and `resolveFileFinder` resolution and refusals; `command-help.spec.ts` covers the `/help` listing text.
+- `packages/ui/tui/tests/pty-boot.spec.ts` boots the shipped profile under a real PTY: the slash menu draws from the live composition, `/help` prints the listing while the mock model serves zero requests and the footer stays at `0 tokens`, `@` offers workspace files through the real finder, and a 20x5 terminal shows no menu while the input stays usable.
 
 ## Deferred
 
-**Tier B — the input trigger pipeline.** Detect `/` and `@` under the caret and offer grouped candidates, matching [`ui-input-trigger`](../../../../packages/client/ui-input-trigger/README.md), [`ui-commands`](../../../../packages/client/ui-commands/README.md), and [`ui-skill`](../../../../packages/client/ui-skill/README.md). Build it on pi-tui's `AutocompleteProvider`. This tier is the terminal's whole discovery story.
-
-**Tier C — new terminal screens.** Each item needs a surface the terminal does not have: [`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md), [`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md), [`ui-model-selection`](../../../../packages/client/ui-model-selection/README.md), [`ui-workspace`](../../../../packages/client/ui-workspace/README.md), [`ui-jobs`](../../../../packages/client/ui-jobs/README.md), [`ui-subagent`](../../../../packages/client/ui-subagent/README.md), [`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md), [`ui-attachment`](../../../../packages/client/ui-attachment/README.md), and the `ui-settings` family. Two of these close limitations `dsh-tui` already records as deferred: the absent session switcher and the absent terminal model picker. Inline images are the third, and pi-tui's `Image` component is the mechanism.
+**Tier C — new terminal screens.** Each item needs a surface the terminal does not have: [`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md), [`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md), [`ui-model-selection`](../../../../packages/client/ui-model-selection/README.md), [`ui-workspace`](../../../../packages/client/ui-workspace/README.md), [`ui-jobs`](../../../../packages/client/ui-jobs/README.md), [`ui-subagent`](../../../../packages/client/ui-subagent/README.md), [`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md), [`ui-attachment`](../../../../packages/client/ui-attachment/README.md), and the `ui-settings` family. Two of these close limitations `dsh-tui` already records as deferred: the absent session switcher and the absent terminal model picker. Inline images are the third, and pi-tui's `Image` component is the mechanism. A fourth opens here once the terminal gains a reference or attachment pipeline: model-serialized file references and a skill trigger to match the web surface.

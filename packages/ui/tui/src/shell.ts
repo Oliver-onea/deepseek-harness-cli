@@ -19,6 +19,8 @@ import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
+import { TerminalAutocomplete } from './autocomplete.ts'
+import type { AutocompleteOptions } from './autocomplete.ts'
 import { displayLine } from './display-text.ts'
 import type { PanelHost } from './questions.ts'
 import { renderStatus } from './status.ts'
@@ -59,6 +61,11 @@ export interface ShellOptions {
    * default-model service.
    */
   defaultRoute: { provider: string; model: string } | undefined
+  /**
+   * The input-trigger menus, when the composition wires them: `/` offers the
+   * commands the live registry resolves, `@` offers workspace files.
+   */
+  autocomplete?: AutocompleteOptions | undefined
 }
 
 /** The editor's placeholder-free border styling. */
@@ -119,6 +126,14 @@ export class TerminalShell implements PanelHost {
       },
     }, { paddingX: EDITOR_PADDING_X })
     this.editor.onSubmit = (text: string) => { void this.submit(text) }
+    const autocomplete = options.autocomplete
+    if (autocomplete !== undefined) {
+      this.editor.setAutocompleteProvider(new TerminalAutocomplete({
+        ...autocomplete,
+        rows: () => options.tui.terminal.rows,
+        syncMaxVisible: (visible) => { this.editor.setAutocompleteMaxVisible(visible) },
+      }))
+    }
   }
 
   /** Compose the layout and take the keyboard. */
