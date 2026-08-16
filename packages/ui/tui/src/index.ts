@@ -27,9 +27,10 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-plan-mode'
+import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { installApprovalAnswerer } from './approval.ts'
-import { resolveFileFinder } from './autocomplete.ts'
+import { childDisplayName, childRunning, type RunningChild } from './autocomplete.ts'
 import { helpText } from './command-help.ts'
 import { TerminalQuestions } from './questions.ts'
 import { createPalette } from './theme.ts'
@@ -63,7 +64,6 @@ const DEFAULT_MAX_SUGGESTIONS = 8
 
 /** Default bound for waiting on the composition's configured agent. */
 export const DEFAULT_AGENT_WAIT_TIMEOUT_MS = 30_000
-
 /** Plugin config. */
 export interface Config {
   /** The exact session id of the agent this terminal drives, as created by the host. */
@@ -82,11 +82,6 @@ export interface Config {
   agentWaitTimeoutMs?: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions?: number
-  /**
-   * File-finder binary backing fuzzy `@` search. Unset searches `PATH` for
-   * `fd` (then `fdfind`); an explicit path that does not exist refuses startup.
-   */
-  fileFinderPath?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -98,7 +93,6 @@ export const Config: z<Config> = z.object({
   task: z.string(),
   agentWaitTimeoutMs: z.number().step(1).min(1).default(DEFAULT_AGENT_WAIT_TIMEOUT_MS),
   maxSuggestions: z.natural().min(1).default(DEFAULT_MAX_SUGGESTIONS),
-  fileFinderPath: z.string(),
 })
 
 /** The terminal settings after defaulting: what {@link TerminalShell} reads. */
@@ -115,8 +109,6 @@ export interface ResolvedConfig {
   agentWaitTimeoutMs: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions: number
-  /** File-finder binary behind fuzzy `@` search; `null` when none is available. */
-  fileFinderPath: string | null
 }
 
 /**
@@ -135,7 +127,6 @@ export function resolveTerminalConfig(config: Config): ResolvedConfig {
     showReasoning: config.showReasoning ?? false,
     agentWaitTimeoutMs: config.agentWaitTimeoutMs ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS,
     maxSuggestions: config.maxSuggestions ?? DEFAULT_MAX_SUGGESTIONS,
-    fileFinderPath: resolveFileFinder(config.fileFinderPath),
   }
 }
 
@@ -300,6 +291,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const planMode = ctx.get('planMode')
   const permissionPresets = ctx.get('permissionPresets')
   const commands = ctx.get('commands')
+  const subagents = ctx.get('subagents')
   const shell = new TerminalShell({
     tui,
     agent,
@@ -323,8 +315,13 @@ async function start(ctx: Context, config: Config): Promise<void> {
     defaultRoute,
     autocomplete: {
       commands: commands === undefined ? () => [] : () => commands.list(agent),
-      workspacePath: process.cwd(),
-      fileFinderPath: settings.fileFinderPath,
+      subagents: subagents === undefined ? undefined : async (signal): Promise<readonly RunningChild[]> => {
+        const children = await subagents.listChildren(agent.session.id, signal)
+        return children.flatMap((entry) => {
+          const live = ctx.agents.get(entry.id)
+          return childRunning(entry, live) ? [{ name: childDisplayName(entry, live) }] : []
+        })
+      },
       maxVisible: settings.maxSuggestions,
     },
   })

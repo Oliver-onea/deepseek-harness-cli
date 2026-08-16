@@ -63,7 +63,8 @@ export interface ShellOptions {
   defaultRoute: { provider: string; model: string } | undefined
   /**
    * The input-trigger menus, when the composition wires them: `/` offers the
-   * commands the live registry resolves, `@` offers workspace files.
+   * commands the live registry resolves, `@` offers running subagent
+   * children.
    */
   autocomplete?: AutocompleteOptions | undefined
 }
@@ -224,13 +225,21 @@ export class TerminalShell implements PanelHost {
   }
 
   /**
-   * Handle the terminal-only controls. Keys that belong to a live panel or to
-   * the editor are not claimed here.
+   * Handle the terminal-only controls. Keys that belong to a live panel, to
+   * the open suggestion menu, or to the editor are not claimed here.
    * @param data - the raw input sequence.
    * @returns whether this shell consumed the key.
    */
   handleKey(data: string): boolean {
     if (this.panels.size > 0) return false
+    if (this.editor.isShowingAutocomplete() && matchesKey(data, 'escape')) {
+      // Esc with a menu open dismisses the menu only: the running turn keeps
+      // running and queued work survives, because cancel would clear it.
+      // The editor's own dismiss path repaints nothing, so request the draw.
+      this.editor.handleInput(data)
+      this.options.tui.requestRender()
+      return true
+    }
     if (matchesKey(data, 'escape')) {
       this.options.agent.cancel({ kind: 'user' })
       return true

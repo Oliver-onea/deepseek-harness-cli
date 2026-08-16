@@ -112,7 +112,7 @@ describe('renderStatus', () => {
 
   it('swaps in elapsed time and the interrupt hint while a turn runs', () => {
     expect(renderStatus({ ...idle, running: true, elapsedMs: 5000 }, plain))
-      .toBe('working 5s · deepseek-official/deepseek-v4-flash · 0 tokens · esc interrupt')
+      .toBe('working 5s · deepseek-official/deepseek-v4-flash · 0 tokens · ctrl+c interrupt')
   })
 
   it('reports queued work and the plan when there is any', () => {

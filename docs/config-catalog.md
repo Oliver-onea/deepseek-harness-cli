@@ -2821,11 +2821,6 @@ export interface Config {
   agentWaitTimeoutMs?: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions?: number
-  /**
-   * File-finder binary backing fuzzy `@` search. Unset searches `PATH` for
-   * `fd` (then `fdfind`); an explicit path that does not exist refuses startup.
-   */
-  fileFinderPath?: string
 }
 ```
 

@@ -30,15 +30,18 @@ DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可�
 
 ### 第 B 层——输入触发管线
 
-编辑器基于 pi-tui 的自动补全提供两个触发菜单（`CombinedAutocompleteProvider` 之上的一层薄封装，[`autocomplete.ts`](../../../../packages/ui/tui/src/autocomplete.ts)）：
+编辑器基于 pi-tui 的自动补全提供两个触发菜单（[`autocomplete.ts`](../../../../packages/ui/tui/src/autocomplete.ts)），对应 Web 端两个键入式来源：
 
-- 在输入开头键入 `/` 列出活跃 [`ctx.commands`](../../../../packages/interaction/commands/README.md) 注册表为被驱动 agent 解析的命令。封装层在每次查询时读取 `commands.list(agent)`，因此屏幕启动后注册的命令会在下一次击键时出现，被遮蔽的命令随之消失，无需重启。
-- 在词边界键入 `@` 通过 `fd`/`fdfind` 二进制（可用 `fileFinderPath` 配置；没有查找器则 `@` 不提供候选）列出工作目录下的工作区文件。
-- 候选的标签与描述在编辑器绘制前经过 `displayLine()`；补全值保持字面量，使选中的候选插入的正是查到的内容。
+- 在输入开头键入 `/` 列出活跃 [`ctx.commands`](../../../../packages/interaction/commands/README.md) 注册表为被驱动 agent 解析的命令。provider 在每次查询时读取 `commands.list(agent)`，因此屏幕启动后注册的命令会在下一次击键时出现，被遮蔽的命令随之消失，无需重启。
+- 在词边界键入 `@` 列出本会话**正在运行的子 agent** —— 与 Web 端 `@` 来源读取的是同一份名册（`ctx.subagents.listChildren` 过滤到运行中，对应 [`ui-subagent`](../../../../packages/client/ui-subagent/README.md)）。子 agent 的名字依次取其持久会话标题、创建标签、原始 id，与 Web 端会话列表的标题优先阶梯一致。未组合 subagent 能力时 `@` 不提供候选。文件补全被有意排除：Web 端没有文件补全来源，同一按键下换成另一种功能会使两端分叉。
+- 候选的标签、描述与补全值在编辑器绘制或插入前都经过 `displayLine()`，注册表文本与受模型影响的标题无法把控制字节带到屏幕或草稿。
 - `/help` 是一条真实命令，与 `exit`/`quit` 一起注册，其文本列出活跃注册表——页脚的 `/help` 提示指向一条可解析的命令，运行它不会开启模型回合。
-- 选中的 `/` 候补全为命令行并经注册表提交，因此永远不会到达模型；选中的 `@` 候选把文件路径作为纯引用文本插入并随提示提交——即 Web 端的纯文本拾取分支。终端没有引用或附件管线（没有 U+FFFC 占位符，没有按来源的编解码器）；那套机制属于未来的附件能力，而把拾取静默降级为什么都不做，比诚实的路径文本更糟。
+- 选中的 `/` 候补全为命令行并经注册表提交，因此永远不会到达模型。选中的 `@` 候选把引用 `@name ` 插入输入框并原样送达模型——即 Web 端的纯文本拾取分支；agent 端对 `@` 引用的消费在两端都是未来的业务工作。
+- 菜单打开时 `esc` 只关闭菜单：shell 在中断分支之前把该键交给编辑器，因为 `Agent.cancel` 会清空排队工作，而一个菜单不构成丢失它的理由。`ctrl+c` 仍是唯一的一键中断；页脚运行提示写的是 `ctrl+c` 而非 `esc`。
 
-降级：菜单收敛到页脚、编辑器与一行对话记录之外剩余的行数（`menuRowsFor`），连一行候选都放不下的终端——经过压力测试的 20x5——干脆不显示菜单。`maxSuggestions` 约束该收敛之前的行数；调色板同时服务于两个菜单，因此 `color: false` 以相同布局无样式渲染。
+降级：菜单收敛到页脚、编辑器与一行对话记录之外剩余的行数（`menuRowsFor`），连一行候选都放不下的终端——经过压力测试的 20x5——根本不创建菜单，因此不存在要渲染或捕获按键的隐形列表；触发键保持无效，`enter` 提交字面文本。`maxSuggestions` 约束该收敛之前的行数；调色板同时服务于两个菜单，因此 `color: false` 以相同布局无样式渲染。
+
+可达子集：pi-tui 的编辑器按其现状只在首行开头检测 `/`、只在词边界检测 `@`，渲染单个扁平列表，并在 `enter` 确认的同一击键内应用补全并提交。行中的 `/`、标点后的 `@`、后续行上的触发符以及按来源分组的小标题都需要 fork 编辑器——被优先使用依赖而非手写的政策否决，并作为声明的分歧记入 `dsh-tui` 的 README 限制。
 
 ### 对齐不意味着什么
 
@@ -58,16 +61,16 @@ DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可�
 
 终端只有一个视口，每个新增指示器都在与对话记录争夺行数。第 A 层通过隐藏已完成目标、截断过长目标、以及在状态缺失时隐藏指示器来缓解；第 B 层的菜单收敛到页脚、编辑器与一行对话记录之外剩余的行数，并在连一行候选都放不下的终端上完全让位；第 C 层仍需为经过压力测试的 20x5 场景制定自己的降级规则。
 
-`/` 菜单只按注册表的名称序列出命令，没有 Web 端按来源分组的小标题；技能来源可以注册自己的候选，但目前尚无终端组合挂载它。
+`/` 菜单只按注册表的名称序列出命令，没有 Web 端按来源分组的小标题，也没有组合技能来源，因此 `/` 下只出现命令；Web 端的技能来源尚无终端对应物。
 
 ## 验证
 
-- `packages/ui/tui/tests/status.spec.ts` 覆盖目标、计划模式和权限预设的格式化，包括缺失时的省略。
-- `packages/ui/tui/tests/shell.spec.ts` 覆盖新读取器触发的页脚更新、读取器缺失时隐藏指示器，并端到端驱动输入触发菜单：活跃名册的提供与收窄、esc 关闭、键盘选择与 tab 补全、`@` 文件拾取、斜杠拾取经注册表提交、小终端的收敛与完全抑制，以及 `color` 关闭时菜单布局不变。
-- `packages/ui/tui/tests/tui.spec.ts` 使用真实的 `dsh-goal` 和 `dsh-plan-mode` 服务以及 permission-preset 读取器挂载插件，并断言页脚反映实时服务状态；同时证明 `/help` 从活跃注册表应答且不产生任何 `user/message` 或 `turn/start` 事件、挂载后注册的命令会被列出，以及销毁插件 fiber 会移除每条终端自有命令。
-- `packages/ui/tui/tests/autocomplete.spec.ts` 覆盖候选取值与规范化、行预算、活跃名册读取、委托补全语义、经真实文件查找器的 `@` 搜索，以及 `resolveFileFinder` 的解析与拒绝；`command-help.spec.ts` 覆盖 `/help` 列表文本。
-- `packages/ui/tui/tests/pty-boot.spec.ts` 在真实 PTY 下启动发布组合：斜杠菜单由活跃组合绘制、`/help` 打印列表且 mock 模型服务零请求、页脚保持 `0 tokens`、`@` 经真实查找器提供工作区文件，20x5 终端不显示菜单而输入保持可用。
+- `packages/ui/tui/tests/status.spec.ts` 覆盖目标、计划模式和权限预设的格式化，包括缺失时的省略，以及页脚运行提示写的是 `ctrl+c`。
+- `packages/ui/tui/tests/shell.spec.ts` 覆盖新读取器触发的页脚更新、读取器缺失时隐藏指示器，并端到端驱动输入触发菜单：活跃名册的提供与收窄、esc 关闭菜单而不取消 agent（排队工作保留）、键盘选择与 tab 补全、`@` 拾取逐字落入 `@name `、斜杠拾取经注册表提交、行阈值在过小终端上让触发键保持无效而 `enter` 提交字面文本、行数收敛，以及 `color` 关闭时菜单布局不变。
+- `packages/ui/tui/tests/tui.spec.ts` 使用真实的 `dsh-goal` 和 `dsh-plan-mode` 服务以及 permission-preset 读取器挂载插件，并断言页脚反映实时服务状态；同时证明 `/help` 从活跃注册表应答且不产生任何 `user/message` 或 `turn/start` 事件、挂载后注册的命令会被列出、经真实输入监听器的 esc 在菜单打开时绝不到达 `Agent.cancel`（无菜单时仍中断）、携带控制字节的描述只能以可见的 `\xNN` 转义到达屏幕、`@` 菜单经组合的名册列出运行中子 agent 且没有名册时不提供候选，以及销毁插件 fiber 会移除每条终端自有命令。
+- `packages/ui/tui/tests/autocomplete.spec.ts` 覆盖候选取值与净化（包括含 OSC 序列的名字）、列出子 agent 的名字阶梯与运行判定、`@` 词元提取、行预算、活跃名册读取、名册读取失败的包容、两个触发符的补全语义，以及文件补全永不触发；`command-help.spec.ts` 覆盖 `/help` 列表文本。
+- `packages/ui/tui/tests/pty-boot.spec.ts` 在真实 PTY 下启动发布组合：斜杠菜单由活跃组合绘制、`/help` 打印列表且 mock 模型服务零请求、页脚保持 `0 tokens`、菜单打开时的 esc 让运行中的回合及其排队后续都送达模型，20x5 终端不显示菜单而输入保持可用。
 
 ## 推迟
 
-**第 C 层——新的终端画面。** 此处每一项都需要终端尚不具备的界面：[`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md)、[`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md)、[`ui-model-selection`](../../../../packages/client/ui-model-selection/README.md)、[`ui-workspace`](../../../../packages/client/ui-workspace/README.md)、[`ui-jobs`](../../../../packages/client/ui-jobs/README.md)、[`ui-subagent`](../../../../packages/client/ui-subagent/README.md)、[`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md)、[`ui-attachment`](../../../../packages/client/ui-attachment/README.md)，以及 `ui-settings` 系列。其中两项可以关闭 `dsh-tui` 已记录为推迟的限制：缺失的会话切换器与缺失的终端模型选择器。行内图片是第三项，pi-tui 的 `Image` 组件就是其机制。第四项在终端获得引用或附件管线后在此开启：模型序列化的文件引用，以及与 Web 端对齐的技能触发。
+**第 C 层——新的终端画面。** 此处每一项都需要终端尚不具备的界面：[`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md)、[`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md)、[`ui-model-selection`](../../../../packages/client/ui-model-selection/README.md)、[`ui-workspace`](../../../../packages/client/ui-workspace/README.md)、[`ui-jobs`](../../../../packages/client/ui-jobs/README.md)、[`ui-subagent`](../../../../packages/client/ui-subagent/README.md)、[`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md)、[`ui-attachment`](../../../../packages/client/ui-attachment/README.md)，以及 `ui-settings` 系列。其中两项可以关闭 `dsh-tui` 已记录为推迟的限制：缺失的会话切换器与缺失的终端模型选择器。行内图片是第三项，pi-tui 的 `Image` 组件就是其机制。同样推迟的还有编辑器层的触发检测本身（行中的 `/`、标点后的 `@`、后续行上的触发符、分组小标题），那需要一个支持它们的编辑器。

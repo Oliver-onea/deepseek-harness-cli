@@ -14,7 +14,6 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMockLlmServer, type MockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
-import { resolveFileFinder } from '../src/autocomplete.ts'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../..', import.meta.url))
 const BIN = join(REPO_ROOT, 'apps/cli/src/bin.ts')
@@ -99,8 +98,6 @@ function plain(raw: string): string {
 interface Terminal {
   /** Type raw text without submitting. */
   type(text: string): void
-  /** Type one character at a time, the way a keyboard does. */
-  typeEach(text: string): Promise<void>
   /** Type a line and submit it. */
   submit(line: string): void
   /** Resolve once the screen contains `text`, or reject at `timeoutMs`. */
@@ -158,20 +155,6 @@ function launch(baseUrl: string, over: { cols?: number; rows?: number } = {}): T
   }
   return {
     type(text: string): void { child.write(text) },
-    /**
-     * Type one character at a time, waiting for the screen to echo each one:
-     * the editor's trigger detection reads one character per input event, and
-     * writes the child has not processed yet can coalesce into a burst it
-     * inserts without triggering.
-     */
-    async typeEach(text: string): Promise<void> {
-      let typed = ''
-      for (const character of text) {
-        typed += character
-        child.write(character)
-        await waitFor(typed, TURN_TIMEOUT_MS)
-      }
-    },
     submit(line: string): void { child.write(`${line}\r`) },
     waitFor,
     screen(): string { return plain(screenText) },
@@ -235,24 +218,36 @@ describe('the dsh terminal profile under a real PTY', () => {
     }
   }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
 
-  it.skipIf(resolveFileFinder(undefined) === null)('offers workspace files under @', async () => {
+  it('esc with a menu open dismisses it and queued work still runs', async () => {
     const terminal = launch(server?.baseURL ?? '')
     try {
       await terminal.waitFor('ready', BOOT_TIMEOUT_MS)
-      await terminal.typeEach('@packa')
-      await terminal.waitFor('package.json', TURN_TIMEOUT_MS)
+      // Open a turn, then queue a second prompt behind it.
+      terminal.submit('first question')
+      await terminal.waitFor('first question', TURN_TIMEOUT_MS)
+      terminal.submit('second question')
+      await terminal.waitFor('second question', TURN_TIMEOUT_MS)
+
+      // Open the slash menu, dismiss it with esc: the running turn keeps its
+      // queued follow-up — both prompts still reach the model.
+      terminal.type('/')
+      await terminal.waitFor('Compact older conversation history', TURN_TIMEOUT_MS)
       terminal.type('\x1b')
       await new Promise(resolve => setTimeout(resolve, 200))
-      for (const _ of '@packa') {
-        terminal.type('\x7f')
-        await new Promise(resolve => setTimeout(resolve, 25))
-      }
+      terminal.type('\x7f')
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await terminal.waitFor(ANSWER, TURN_TIMEOUT_MS)
+      await new Promise(resolve => setTimeout(resolve, TURN_TIMEOUT_MS))
+      expect(server?.requests.length ?? 0).toBeGreaterThanOrEqual(2)
+
+      // The dismissed menu released the editor: the typed line submits.
       terminal.submit('/exit')
       await expect(terminal.exited).resolves.toBe(0)
     } finally {
       terminal.kill()
     }
-  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 4)
 
   it('yields the menu on a 20x5 terminal and keeps the input usable', async () => {
     const terminal = launch(server?.baseURL ?? '', { cols: 20, rows: 5 })
