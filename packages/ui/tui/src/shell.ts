@@ -19,6 +19,8 @@ import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
+import { TerminalAutocomplete } from './autocomplete.ts'
+import type { AutocompleteOptions } from './autocomplete.ts'
 import { displayLine } from './display-text.ts'
 import type { PanelHost } from './questions.ts'
 import { renderStatus } from './status.ts'
@@ -59,6 +61,12 @@ export interface ShellOptions {
    * default-model service.
    */
   defaultRoute: { provider: string; model: string } | undefined
+  /**
+   * The input-trigger menus, when the composition wires them: `/` offers the
+   * commands the live registry resolves, `@` offers running subagent
+   * children.
+   */
+  autocomplete?: AutocompleteOptions | undefined
 }
 
 /** The editor's placeholder-free border styling. */
@@ -119,6 +127,14 @@ export class TerminalShell implements PanelHost {
       },
     }, { paddingX: EDITOR_PADDING_X })
     this.editor.onSubmit = (text: string) => { void this.submit(text) }
+    const autocomplete = options.autocomplete
+    if (autocomplete !== undefined) {
+      this.editor.setAutocompleteProvider(new TerminalAutocomplete({
+        ...autocomplete,
+        rows: () => options.tui.terminal.rows,
+        syncMaxVisible: (visible) => { this.editor.setAutocompleteMaxVisible(visible) },
+      }))
+    }
   }
 
   /** Compose the layout and take the keyboard. */
@@ -209,13 +225,21 @@ export class TerminalShell implements PanelHost {
   }
 
   /**
-   * Handle the terminal-only controls. Keys that belong to a live panel or to
-   * the editor are not claimed here.
+   * Handle the terminal-only controls. Keys that belong to a live panel, to
+   * the open suggestion menu, or to the editor are not claimed here.
    * @param data - the raw input sequence.
    * @returns whether this shell consumed the key.
    */
   handleKey(data: string): boolean {
     if (this.panels.size > 0) return false
+    if (this.editor.isShowingAutocomplete() && matchesKey(data, 'escape')) {
+      // Esc with a menu open dismisses the menu only: the running turn keeps
+      // running and queued work survives, because cancel would clear it.
+      // The editor's own dismiss path repaints nothing, so request the draw.
+      this.editor.handleInput(data)
+      this.options.tui.requestRender()
+      return true
+    }
     if (matchesKey(data, 'escape')) {
       this.options.agent.cancel({ kind: 'user' })
       return true

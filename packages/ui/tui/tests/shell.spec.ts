@@ -11,7 +11,12 @@ import type { ToolPresenter } from '../src/view.ts'
 const ESCAPE = '\x1b'
 
 /** A renderer stand-in: the shell owns layout and focus, the drawing is pi-tui's. */
-function fakeTui(): ViewportTUI & { renders: number; layoutRoot: Component | undefined; focused: Component | null; overlays: Component[] } {
+function fakeTui(rows = 24): ViewportTUI & {
+  renders: number
+  layoutRoot: Component | undefined
+  focused: Component | null
+  overlays: Component[]
+} {
   const hidden: Component[] = []
   const tui = {
     renders: 0,
@@ -19,7 +24,7 @@ function fakeTui(): ViewportTUI & { renders: number; layoutRoot: Component | und
     focused: null as Component | null,
     overlays: [] as Component[],
     hidden,
-    terminal: { columns: 80, rows: 24 } as unknown as Terminal,
+    terminal: { columns: 80, rows } as unknown as Terminal,
     setLayoutRoot(component: Component | undefined): void { tui.layoutRoot = component },
     setFocus(component: Component | null): void { tui.focused = component },
     requestRender(): void { tui.renders += 1 },
@@ -66,6 +71,74 @@ interface StateReaders {
   goal?: () => { objective: string; phase: string } | undefined
   planMode?: () => { active: boolean; pending?: boolean }
   permissionPreset?: () => string | undefined
+}
+
+/** The editor the shell focused, with the autocomplete surface tests drive. */
+type FocusedEditor = {
+  handleInput(data: string): void
+  render(width: number): string[]
+  getText(): string
+  isShowingAutocomplete(): boolean
+}
+
+/** Let one query settle: suggestion requests run through microtasks. */
+async function settle(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+/**
+ * Resolve once the condition holds, polling past the @ trigger's debounce.
+ * @param ready - the condition to poll.
+ * @param timeoutMs - how long to wait before failing.
+ */
+async function when(ready: () => boolean, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now()
+  while (!ready()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error('condition did not hold in time')
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
+/** A shell whose editor carries the input-trigger menus over a mutable roster. */
+function shellWithMenus(over: { rows?: number; children?: { name: string }[] } = {}): {
+  shell: TerminalShell
+  tui: ReturnType<typeof fakeTui>
+  agent: AgentStub
+  roster: { name: string; description: string }[]
+  children: { name: string }[]
+  editor: () => FocusedEditor
+} {
+  const roster = [
+    { name: 'compact', description: 'Summarize the conversation' },
+    { name: 'exit', description: 'Leave the terminal session' },
+  ]
+  const children = over.children ?? []
+  const tui = fakeTui(over.rows)
+  const agent = fakeAgent()
+  const shell = new TerminalShell({
+    tui,
+    agent,
+    palette: createPalette(false),
+    presenter,
+    commands: undefined,
+    tokenMeter: undefined,
+    headLines: 4,
+    tailLines: 2,
+    showReasoning: false,
+    defaultRoute: undefined,
+    autocomplete: {
+      commands: () => roster,
+      subagents: async () => children,
+      maxVisible: 8,
+    },
+  })
+  shell.start()
+  return {
+    shell, tui, agent, roster, children,
+    editor: () => tui.focused as unknown as FocusedEditor,
+  }
 }
 
 function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime; state?: StateReaders } = {}): {
@@ -364,5 +437,224 @@ describe('TerminalShell', () => {
     shell.refreshStatus()
     const after = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
     expect(after).not.toContain('goal:')
+  })
+})
+
+describe('TerminalShell input-trigger menus', () => {
+  it('offers the live roster under a slash prefix, with descriptions', async () => {
+    const { editor } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    expect(editor().isShowingAutocomplete()).toBe(true)
+    const drawn = editor().render(80).join('\n')
+    expect(drawn).toContain('compact')
+    expect(drawn).toContain('Summarize the conversation')
+    expect(drawn).toContain('exit')
+  })
+
+  it('shows a command registered after the menus were wired, without a restart', async () => {
+    const { editor, roster } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    editor().handleInput('\x1b')
+    expect(editor().isShowingAutocomplete()).toBe(false)
+    roster.push({ name: 'goal', description: 'set or view the goal' })
+    editor().handleInput('g')
+    await settle()
+    expect(editor().render(80).join('\n')).toContain('set or view the goal')
+  })
+
+  it('narrows to the typed prefix', async () => {
+    const { editor } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    editor().handleInput('e')
+    await settle()
+    const drawn = editor().render(80).join('\n')
+    expect(drawn).toContain('exit')
+    expect(drawn).not.toContain('compact')
+  })
+
+  it('dismisses on escape and stays dismissed', async () => {
+    const { editor } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    expect(editor().isShowingAutocomplete()).toBe(true)
+    editor().handleInput('\x1b')
+    expect(editor().isShowingAutocomplete()).toBe(false)
+    expect(editor().render(80).join('\n')).not.toContain('compact')
+  })
+
+  it('moves the selection with the keyboard and completes it on tab', async () => {
+    const { editor } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    editor().handleInput('\x1b[B')
+    editor().handleInput('\t')
+    expect(editor().getText()).toBe('/exit ')
+    expect(editor().isShowingAutocomplete()).toBe(false)
+  })
+
+  it('completes an @ pick as the verbatim reference with a trailing space', async () => {
+    const { editor } = shellWithMenus({ children: [{ name: 'scan-runner' }] })
+    editor().handleInput('@')
+    await when(() => editor().isShowingAutocomplete())
+    editor().handleInput('\t')
+    expect(editor().getText()).toBe('@scan-runner ')
+    expect(editor().isShowingAutocomplete()).toBe(false)
+  })
+
+  it('submits a completed slash pick as a command, not as a model turn', async () => {
+    const execute = vi.fn(() => Promise.resolve(undefined))
+    const roster = [
+      { name: 'compact', description: 'Summarize the conversation' },
+      { name: 'exit', description: 'Leave the terminal session' },
+    ]
+    const tui = fakeTui()
+    const agent = fakeAgent()
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette: createPalette(false),
+      presenter,
+      commands: {
+        find: (_agent: Agent, name: string) => (name === 'compact' ? { name } : undefined),
+        execute,
+      } as unknown as CommandRuntime,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      defaultRoute: undefined,
+      autocomplete: {
+        commands: () => roster,
+        maxVisible: 8,
+      },
+    })
+    shell.start()
+    const editor = tui.focused as unknown as FocusedEditor
+    editor.handleInput('/')
+    await settle()
+    editor.handleInput('\r')
+    await settle()
+    expect(execute).toHaveBeenCalledOnce()
+    expect(agent.followups).toHaveLength(0)
+  })
+
+  it('esc with a menu open dismisses the menu only, keeping the turn and queued work', async () => {
+    const { shell, agent, editor } = shellWithMenus()
+    Object.assign(agent, { status: 'running' as const })
+    agent.followups.push({} as UserMessage)
+    editor().handleInput('/')
+    await settle()
+    expect(editor().isShowingAutocomplete()).toBe(true)
+
+    expect(shell.handleKey(ESCAPE)).toBe(true)
+    expect(editor().isShowingAutocomplete()).toBe(false)
+    expect(agent.cancels).toEqual([])
+    // With the menu closed, the same key resumes its interrupt meaning.
+    expect(shell.handleKey(ESCAPE)).toBe(true)
+    expect(agent.cancels).toEqual([{ kind: 'user' }])
+    // The queued follow-up was never cleared: no cancel reached the agent
+    // while the menu was open.
+    expect(agent.followups).toHaveLength(1)
+  })
+
+  it('offers no menu on a terminal too small for one candidate row', async () => {
+    const { editor } = shellWithMenus({ rows: 5 })
+    editor().handleInput('/')
+    await settle()
+    expect(editor().isShowingAutocomplete()).toBe(false)
+    expect(editor().render(20).join('\n')).not.toContain('compact')
+  })
+
+  it('leaves the row gate inert: keys reach the editor and enter submits the literal text', async () => {
+    const execute = vi.fn(() => Promise.resolve(undefined))
+    const roster = [{ name: 'exit', description: 'Leave the terminal session' }]
+    const tui = fakeTui(5)
+    const agent = fakeAgent()
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette: createPalette(false),
+      presenter,
+      commands: {
+        find: (_agent: Agent, name: string) => (name === 'exit' ? { name } : undefined),
+        execute,
+      } as unknown as CommandRuntime,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      defaultRoute: undefined,
+      autocomplete: {
+        commands: () => roster,
+        maxVisible: 8,
+      },
+    })
+    shell.start()
+    const editor = tui.focused as unknown as FocusedEditor
+    // The trigger key and the selection keys all pass through to the editor;
+    // no invisible list captures them, so nothing is applied.
+    editor.handleInput('/')
+    await settle()
+    editor.handleInput('\x1b[B')
+    editor.handleInput('\x1b[B')
+    editor.handleInput('\t')
+    await settle()
+    expect(editor.isShowingAutocomplete()).toBe(false)
+    expect(editor.getText()).toBe('/')
+    editor.handleInput('e')
+    editor.handleInput('x')
+    editor.handleInput('i')
+    editor.handleInput('t')
+    expect(editor.getText()).toBe('/exit')
+    editor.handleInput('\r')
+    await settle()
+    // Enter submitted exactly what was typed — the literal command line.
+    expect(execute).toHaveBeenCalledOnce()
+    expect(agent.followups).toHaveLength(0)
+  })
+
+  it('bounds the menu rows to what a small terminal can show', async () => {
+    const { editor } = shellWithMenus({ rows: 8 })
+    editor().handleInput('/')
+    await settle()
+    const rows = editor().render(20)
+    const menuRows = rows.filter(line => line.includes('compact') || line.includes('exit')).length
+    expect(menuRows).toBe(2)
+  })
+
+  it('draws the same menu layout with and without color', async () => {
+    const draw = async (color: boolean): Promise<string> => {
+      const tui = fakeTui()
+      const roster = [
+        { name: 'compact', description: 'Summarize the conversation' },
+        { name: 'exit', description: 'Leave the terminal session' },
+      ]
+      const shell = new TerminalShell({
+        tui,
+        agent: fakeAgent(),
+        palette: createPalette(color),
+        presenter,
+        commands: undefined,
+        tokenMeter: undefined,
+        headLines: 4,
+        tailLines: 2,
+        showReasoning: false,
+        defaultRoute: undefined,
+        autocomplete: {
+          commands: () => roster,
+          maxVisible: 8,
+        },
+      })
+      shell.start()
+      const editor = tui.focused as unknown as FocusedEditor
+      editor.handleInput('/')
+      await settle()
+      return editor.render(80).join('\n')
+        .replaceAll(/\x1b\[[0-9;]*[a-zA-Z]/gu, '')
+    }
+    expect(await draw(false)).toBe(await draw(true))
   })
 })

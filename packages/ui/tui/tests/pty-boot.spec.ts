@@ -96,10 +96,14 @@ function plain(raw: string): string {
 
 /** One driven terminal session. */
 interface Terminal {
+  /** Type raw text without submitting. */
+  type(text: string): void
   /** Type a line and submit it. */
   submit(line: string): void
   /** Resolve once the screen contains `text`, or reject at `timeoutMs`. */
   waitFor(text: string, timeoutMs: number): Promise<void>
+  /** The screen so far, control sequences stripped. */
+  screen(): string
   /** Resolve with the process exit code. */
   exited: Promise<number>
   kill(): void
@@ -108,15 +112,16 @@ interface Terminal {
 /**
  * Launch the shipped terminal profile under a real PTY.
  * @param baseUrl - the mock model's OpenAI-compatible base URL.
+ * @param over - the terminal geometry to launch with.
  * @returns the driven terminal.
  */
-function launch(baseUrl: string): Terminal {
+function launch(baseUrl: string, over: { cols?: number; rows?: number } = {}): Terminal {
   const pty = requireFromSubprocess('node-pty') as PtyModule
   const home = mkdtempSync(join(tmpdir(), 'dsh-tui-pty-'))
   const child = pty.spawn(process.execPath, ['--import', 'tsx/esm', BIN, '--profile', 'tui'], {
     name: 'xterm-256color',
-    cols: 100,
-    rows: 30,
+    cols: over.cols ?? 100,
+    rows: over.rows ?? 30,
     cwd: REPO_ROOT,
     env: {
       ...process.env,
@@ -126,11 +131,11 @@ function launch(baseUrl: string): Terminal {
       DSH_TELEMETRY_DISABLED: '1',
     },
   })
-  let screen = ''
+  let screenText = ''
   const waiters: { text: string; resolve: () => void }[] = []
   child.onData((data) => {
-    screen += data
-    const drawn = plain(screen)
+    screenText += data
+    const drawn = plain(screenText)
     for (const waiter of waiters.splice(0)) {
       if (drawn.includes(waiter.text)) waiter.resolve()
       else waiters.push(waiter)
@@ -139,17 +144,20 @@ function launch(baseUrl: string): Terminal {
   const exited = new Promise<number>((resolve) => {
     child.onExit(({ exitCode }) => { resolve(exitCode) })
   })
+  const waitFor = (text: string, timeoutMs: number): Promise<void> => {
+    if (plain(screenText).includes(text)) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`timed out waiting for ${JSON.stringify(text)}; screen was:\n${plain(screenText)}`))
+      }, timeoutMs)
+      waiters.push({ text, resolve: () => { clearTimeout(timer); resolve() } })
+    })
+  }
   return {
+    type(text: string): void { child.write(text) },
     submit(line: string): void { child.write(`${line}\r`) },
-    waitFor(text: string, timeoutMs: number): Promise<void> {
-      if (plain(screen).includes(text)) return Promise.resolve()
-      return new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          reject(new Error(`timed out waiting for ${JSON.stringify(text)}; screen was:\n${plain(screen)}`))
-        }, timeoutMs)
-        waiters.push({ text, resolve: () => { clearTimeout(timer); resolve() } })
-      })
-    },
+    waitFor,
+    screen(): string { return plain(screenText) },
     exited,
     kill(): void { child.kill() },
   }
@@ -182,6 +190,83 @@ describe('the dsh terminal profile under a real PTY', () => {
       terminal.kill()
     }
   }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+
+  it('offers the live slash menu and runs /help without a model turn', async () => {
+    const terminal = launch(server?.baseURL ?? '')
+    try {
+      await terminal.waitFor('ready', BOOT_TIMEOUT_MS)
+      terminal.type('/')
+      await terminal.waitFor('compact', TURN_TIMEOUT_MS)
+      await terminal.waitFor('Compact older conversation history', TURN_TIMEOUT_MS)
+      terminal.type('\x1b')
+      await new Promise(resolve => setTimeout(resolve, 200))
+      terminal.type('\x7f')
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      const requestsBefore = server?.requests.length ?? 0
+      terminal.submit('/help')
+      await terminal.waitFor('/help — List the commands this terminal resolves', TURN_TIMEOUT_MS)
+      await terminal.waitFor('/exit — Leave the terminal session', TURN_TIMEOUT_MS)
+      await new Promise(resolve => setTimeout(resolve, 200))
+      expect(server?.requests.length ?? 0).toBe(requestsBefore)
+      expect(terminal.screen()).toContain('0 tokens')
+
+      terminal.submit('/exit')
+      await expect(terminal.exited).resolves.toBe(0)
+    } finally {
+      terminal.kill()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+
+  it('esc with a menu open dismisses it and queued work still runs', async () => {
+    const terminal = launch(server?.baseURL ?? '')
+    try {
+      await terminal.waitFor('ready', BOOT_TIMEOUT_MS)
+      // Open a turn, then queue a second prompt behind it.
+      terminal.submit('first question')
+      await terminal.waitFor('first question', TURN_TIMEOUT_MS)
+      terminal.submit('second question')
+      await terminal.waitFor('second question', TURN_TIMEOUT_MS)
+
+      // Open the slash menu, dismiss it with esc: the running turn keeps its
+      // queued follow-up — both prompts still reach the model.
+      terminal.type('/')
+      await terminal.waitFor('Compact older conversation history', TURN_TIMEOUT_MS)
+      terminal.type('\x1b')
+      await new Promise(resolve => setTimeout(resolve, 200))
+      terminal.type('\x7f')
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await terminal.waitFor(ANSWER, TURN_TIMEOUT_MS)
+      await new Promise(resolve => setTimeout(resolve, TURN_TIMEOUT_MS))
+      expect(server?.requests.length ?? 0).toBeGreaterThanOrEqual(2)
+
+      // The dismissed menu released the editor: the typed line submits.
+      terminal.submit('/exit')
+      await expect(terminal.exited).resolves.toBe(0)
+    } finally {
+      terminal.kill()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 4)
+
+  it('yields the menu on a 20x5 terminal and keeps the input usable', async () => {
+    const terminal = launch(server?.baseURL ?? '', { cols: 20, rows: 5 })
+    try {
+      await terminal.waitFor('ready', BOOT_TIMEOUT_MS)
+      terminal.type('/')
+      await new Promise(resolve => setTimeout(resolve, 500))
+      // No room for a candidate row: the menu stays closed and the input row
+      // keeps its place.
+      expect(terminal.screen()).not.toContain('Compact older')
+      expect(terminal.screen()).toContain('/')
+
+      terminal.type('exit')
+      terminal.submit('')
+      await expect(terminal.exited).resolves.toBe(0)
+    } finally {
+      terminal.kill()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS)
 
   it.each([
     ['stdin redirected', `${shellQuote(process.execPath)} --import tsx/esm ${shellQuote(BIN)} < /dev/null`],

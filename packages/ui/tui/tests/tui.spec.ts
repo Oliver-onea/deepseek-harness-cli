@@ -4,6 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SubagentListEntry } from '@deepseek-ai/dsh-subagent'
 import { CallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
@@ -113,13 +114,18 @@ describe('resolveTerminalConfig', () => {
         tailLines: 4,
         showReasoning: false,
         agentWaitTimeoutMs: tui.DEFAULT_AGENT_WAIT_TIMEOUT_MS,
+        maxSuggestions: 8,
       })
   })
 
   it('keeps every stated setting', () => {
     expect(tui.resolveTerminalConfig({
       session: SESSION, color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
-    })).toEqual({ color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9 })
+      maxSuggestions: 3,
+    })).toEqual({
+      color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+      maxSuggestions: 3,
+    })
   })
 })
 
@@ -273,6 +279,230 @@ describe('dsh-tui mounting', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(cancels).toEqual([{ kind: 'user' }])
     expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('answers /help with the live command list and no model turn', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    const agent = registerAgent(ctx)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('List the commands this terminal resolves')
+    terminal.input('\x1b')
+    terminal.input('\x7f')
+
+    const settled = await ctx.commands.execute(agent, '/help', new AbortController().signal)
+    expect(settled?.result).toMatchObject({ kind: 'success' })
+    const listed = settled !== undefined && settled.result.kind === 'success' ? settled.result.text : ''
+    expect(listed).toContain('/exit — Leave the terminal session')
+    expect(listed).toContain('/help — List the commands this terminal resolves')
+    const types = agent.session.events.map(event => event.type)
+    expect(types).toContain('command/run')
+    expect(types).toContain('command/done')
+    expect(types).not.toContain('user/message')
+    expect(types).not.toContain('turn/start')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('/help — List the commands this terminal resolves')
+  })
+
+  it('lists a command registered after the terminal mounted, without a restart', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    const agent = registerAgent(ctx)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const dispose = ctx.commands.register({
+      name: 'demo-late',
+      description: 'registered after the screen is up',
+      handler: () => ({ kind: 'success' }),
+    })
+    const shellCommands = ctx.commands.list(agent).map(command => command.name)
+    expect(shellCommands).toContain('demo-late')
+    const settled = await ctx.commands.execute(agent, '/help', new AbortController().signal)
+    expect(settled?.result.kind).toBe('success')
+    const listed = settled !== undefined && settled.result.kind === 'success' ? settled.result.text : ''
+    expect(listed).toContain('/demo-late — registered after the screen is up')
+    dispose()
+    expect(ctx.commands.list(agent).map(command => command.name)).not.toContain('demo-late')
+  })
+
+  it('removes every terminal-owned command when the plugin fiber disposes', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    const agent = registerAgent(ctx)
+    const fiber = await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(ctx.commands.list(agent).map(command => command.name))
+      .toEqual(expect.arrayContaining(['exit', 'quit', 'help']))
+
+    await fiber.dispose()
+
+    expect(ctx.commands.list(agent)).toEqual([])
+  })
+
+  it('offers no command menu when the composition mounts no command registry', async () => {
+    const { terminal } = await mount()
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('/')
+    expect(screen(terminal)).not.toContain('Leave the terminal session')
+  })
+
+  it('esc through the input listener dismisses the menu without cancelling the agent', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    const agent = registerAgent(ctx)
+    const cancels: unknown[] = []
+    Object.assign(agent, { cancel: (cause: unknown) => { cancels.push(cause) } })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('List the commands this terminal resolves')
+    terminal.input('\x1b')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // The esc reached the editor's dismiss path, never the agent's cancel:
+    // queued prompts and the running turn survive.
+    expect(cancels).toEqual([])
+  })
+
+  it('esc with no menu open still cancels the running turn', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    const agent = registerAgent(ctx)
+    const cancels: unknown[] = []
+    Object.assign(agent, { cancel: (cause: unknown) => { cancels.push(cause) } })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('\x1b')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(cancels).toEqual([{ kind: 'user' }])
+  })
+
+  it('escapes control bytes in a candidate description before they reach the screen', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    registerAgent(ctx)
+    ctx.commands.register({
+      name: 'evil',
+      description: 're\x1b]0;hijack\x07paint',
+      handler: () => ({ kind: 'success' }),
+    })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // The drawn menu carries the visible escape text, not a live OSC sequence.
+    expect(screen(terminal)).toContain('re\\x1b]0;hijack\\x07paint')
+    terminal.input('\x1b')
+  })
+
+  it('offers running subagent children under @ when the capability is composed', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    registerAgent(ctx)
+    const child = {
+      kind: 'child',
+      id: SessionId('session-child'),
+      activity: 'running',
+      hasChildren: false,
+      mode: 'continuable',
+      label: 'scan-runner',
+    } as SubagentListEntry
+    const settledChild = {
+      kind: 'child',
+      id: SessionId('session-settled'),
+      activity: 'inactive',
+      hasChildren: false,
+      mode: 'one-shot',
+      label: 'settled-runner',
+    } as SubagentListEntry
+    ctx.provide('subagents', {
+      listChildren: async () => [child, settledChild],
+    } as never)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('@')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('scan-runner')
+    expect(screen(terminal)).not.toContain('settled-runner')
+    terminal.input('\x1b')
+  })
+
+  it('offers no @ menu when the composition mounts no subagent capability', async () => {
+    const { terminal } = await mount()
+    terminal.input('@')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).not.toContain('runner')
   })
 
   it('answers this session approval requests through the same panel', async () => {
