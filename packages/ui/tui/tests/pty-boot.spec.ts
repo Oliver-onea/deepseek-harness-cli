@@ -8,12 +8,13 @@
  */
 
 import { createRequire } from 'node:module'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMockLlmServer, type MockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
+import { createTuiHarness } from '../../../../apps/cli/tests/tui-interaction.harness.ts'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../..', import.meta.url))
 const BIN = join(REPO_ROOT, 'apps/cli/src/bin.ts')
@@ -92,6 +93,40 @@ function plain(raw: string): string {
     .replaceAll(/\x1b\][^\x07]*\x07/gu, '')
     .replaceAll(/\x1b\[[0-9;?]*[a-zA-Z]/gu, '')
     .replaceAll(/\x1b[<>=][a-zA-Z0-9]*/gu, '')
+}
+
+/**
+ * Resolve once the condition holds, polling past the mock-backed turn's
+ * latency; for states the screen cannot distinguish, like a repeated answer.
+ * @param ready - the condition to poll.
+ * @param timeoutMs - how long to wait before failing.
+ */
+async function when(ready: () => boolean, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now()
+  while (!ready()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error('condition did not hold in time')
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+}
+
+/**
+ * Read the one session id a harness home persists, from its session
+ * directory: `<root>/<project>/<session-id>/session.jsonl`.
+ * @param sessionsRoot - the harness home's `sessions` directory.
+ * @returns the encoded session id the resume flag names.
+ */
+function soleSessionId(sessionsRoot: string): string {
+  const projects = readdirSync(sessionsRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => join(sessionsRoot, entry.name))
+  const sessionDirs = projects.flatMap(project =>
+    readdirSync(project, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => join(project, entry.name)))
+  if (sessionDirs.length !== 1) {
+    throw new Error(`expected exactly one persisted session, found ${String(sessionDirs.length)}`)
+  }
+  return basename(sessionDirs[0] as string)
 }
 
 /** One driven terminal session. */
@@ -310,4 +345,152 @@ describe('the dsh terminal profile under a real PTY', () => {
       rmSync(home, { recursive: true, force: true })
     }
   }, BOOT_TIMEOUT_MS)
+})
+
+describe('the /model command under a real PTY', () => {
+  it('picks from the live catalog, survives esc with queued work, and routes the next request', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+
+      // Open a turn, then queue a second prompt behind it.
+      harness.submit('first question')
+      await harness.waitFor('first question', TURN_TIMEOUT_MS)
+      harness.submit('second question')
+      await harness.waitFor('second question', TURN_TIMEOUT_MS)
+
+      // The picker lists the composition's advertised routes over the live
+      // adapter registry, with the current route marked.
+      harness.submit('/model')
+      await harness.waitFor('deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+      await harness.waitFor('deepseek-v4-flash', TURN_TIMEOUT_MS)
+
+      // Dismiss with esc: the running turn and its queued follow-up still
+      // reach the model, because a dismissed picker cancels nothing.
+      harness.key('esc')
+      await harness.waitFor(ANSWER, TURN_TIMEOUT_MS)
+      await new Promise(resolve => setTimeout(resolve, TURN_TIMEOUT_MS))
+      expect(server?.requests.length ?? 0).toBeGreaterThanOrEqual(2)
+
+      // A numbered pick applies mid-session: the notice names the route and
+      // the footer carries it. The reopen draws text the first open already
+      // put on the cumulative screen, so give the panel the keyboard before
+      // typing; the switched-to notice is the assertion that the pick landed.
+      harness.submit('/model')
+      await new Promise(resolve => setTimeout(resolve, 500))
+      harness.type('2')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+
+      // The footer restates the new route immediately, before any further
+      // request exists to log it: the bottom of the screen names v4-pro while
+      // the request count has not moved.
+      const requestCount = (): number => server?.requests.length ?? 0
+      const beforeFooter = requestCount()
+      const footerNamed = (): boolean => harness.snapshot()
+        .split('\n')
+        .slice(-4)
+        .some(line => line.includes('deepseek-official/deepseek-v4-pro'))
+      await when(footerNamed, TURN_TIMEOUT_MS)
+      expect(requestCount()).toBe(beforeFooter)
+
+      // The next request actually runs on the switched route.
+      const before = requestCount()
+      harness.submit('after the switch')
+      await harness.waitFor('after the switch', TURN_TIMEOUT_MS)
+      await when(() => (server?.requests.length ?? 0) > before, TURN_TIMEOUT_MS)
+      const served = server?.requests.slice(before) ?? []
+      expect((served.at(-1)?.body as { model?: string }).model).toBe('deepseek-v4-pro')
+
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 6)
+
+  it('switches directly by id and refuses an unknown id loudly', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+
+      harness.submit('/model deepseek-v4-pro')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+      await harness.waitFor('deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+
+      harness.submit('/model gpt-neo')
+      await harness.waitFor('unknown model "gpt-neo"', TURN_TIMEOUT_MS)
+      await harness.waitFor('available: deepseek-official/deepseek-v4-flash,', TURN_TIMEOUT_MS)
+      await harness.waitFor('deepseek-v4-pro', TURN_TIMEOUT_MS)
+
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+
+  it('yields the picker on a 20x5 terminal and keeps the input usable', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '', cols: 20, rows: 5 })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+      harness.submit('/model')
+      await new Promise(resolve => setTimeout(resolve, 500))
+      // No candidate row ever drew: the only route ids this screen could have
+      // shown are the catalog's, and none is present.
+      expect(harness.snapshot()).not.toContain('v4-pro')
+      // No invisible list captured the keyboard: typed keys reach the editor.
+      harness.type('q')
+      await harness.waitFor('q', TURN_TIMEOUT_MS)
+      harness.key('backspace')
+      await new Promise(resolve => setTimeout(resolve, 200))
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS)
+
+  it('restores a switched model on --resume from the session log, with no pick involved', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-tui-resume-'))
+    try {
+      // Boot one: switch the route, run a request on it, and leave so the
+      // log flushes with the switched header.
+      const first = createTuiHarness({ baseUrl: server?.baseURL ?? '', home })
+      try {
+        await first.waitFor('ready', BOOT_TIMEOUT_MS)
+        first.submit('/model deepseek-v4-pro')
+        await first.waitFor('Model switched to deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+        const before = server?.requests.length ?? 0
+        first.submit('restore probe')
+        await first.waitFor('restore probe', TURN_TIMEOUT_MS)
+        await when(() => (server?.requests.length ?? 0) > before, TURN_TIMEOUT_MS)
+        const served = server?.requests.slice(before) ?? []
+        expect((served.at(-1)?.body as { model?: string }).model).toBe('deepseek-v4-pro')
+        expect(await first.exit()).toBe(0)
+      } catch (error) {
+        await first.dispose()
+        throw error
+      }
+
+      // The persisted log owns the session id: one session dir under the
+      // harness home's sessions root.
+      const sessionId = soleSessionId(join(home, 'sessions'))
+
+      // Boot two resumes that log. The restored route comes from the log —
+      // not from a pick, and not from the deployment default (flash).
+      const second = createTuiHarness({ baseUrl: server?.baseURL ?? '', home, args: ['--resume', sessionId] })
+      try {
+        await second.waitFor('ready', BOOT_TIMEOUT_MS)
+        const resumedBefore = server?.requests.length ?? 0
+        second.submit('after the resume')
+        await second.waitFor('after the resume', TURN_TIMEOUT_MS)
+        await when(() => (server?.requests.length ?? 0) > resumedBefore, TURN_TIMEOUT_MS)
+        const resumed = server?.requests.slice(resumedBefore) ?? []
+        expect((resumed.at(-1)?.body as { model?: string }).model).toBe('deepseek-v4-pro')
+        expect(await second.exit()).toBe(0)
+      } catch (error) {
+        await second.dispose()
+        throw error
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, (BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS) * 3)
 })

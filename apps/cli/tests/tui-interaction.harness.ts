@@ -86,6 +86,13 @@ export interface TuiHarnessOptions {
   turnTimeoutMs?: number
   /** Extra environment variables for the child. */
   env?: Record<string, string>
+  /** Extra CLI arguments after `--profile tui`, e.g. `['--resume', id]`. */
+  args?: readonly string[]
+  /**
+   * Reuse an existing harness home instead of minting one, so a second boot
+   * can resume a session the first wrote; the caller owns its cleanup.
+   */
+  home?: string
 }
 
 export interface TuiHarness {
@@ -108,6 +115,8 @@ export interface TuiHarness {
   exit(): Promise<number>
   /** Kill the process and clean up the temporary home directory. */
   dispose(): Promise<number>
+  /** The harness home this boot runs on, for reuse across boots. */
+  home(): string
 }
 
 interface Cell {
@@ -329,8 +338,9 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
   const rows = options.rows ?? DEFAULT_ROWS
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
 
-  const home = mkdtempSync(join(tmpdir(), 'dsh-tui-interaction-'))
-  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const owned = options.home === undefined
+  const home = options.home ?? mkdtempSync(join(tmpdir(), 'dsh-tui-interaction-'))
+  if (owned) mkdirSync(join(home, 'sessions'), { recursive: true })
 
   const pty = requireFromSubprocess('node-pty') as PtyModule
   const screen = new TerminalScreen(cols, rows)
@@ -350,13 +360,17 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     if (value !== undefined) childEnv[key] = value
   }
 
-  const child = pty.spawn(process.execPath, ['--import', 'tsx/esm', BIN, '--profile', 'tui'], {
-    name: 'xterm-256color',
-    cols,
-    rows,
-    cwd: REPO_ROOT,
-    env: childEnv,
-  })
+  const child = pty.spawn(
+    process.execPath,
+    ['--import', 'tsx/esm', BIN, '--profile', 'tui', ...(options.args ?? [])],
+    {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd: REPO_ROOT,
+      env: childEnv,
+    },
+  )
 
   const waiters: { predicate: (text: string) => boolean; resolve: () => void }[] = []
 
@@ -414,8 +428,10 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     async dispose(): Promise<number> {
       child.kill('SIGKILL')
       const code = await exitCode
-      rmSync(home, { recursive: true, force: true })
+      if (owned) rmSync(home, { recursive: true, force: true })
       return code
     },
+    /** The harness home, for a caller reusing it across boots. */
+    home: (): string => home,
   }
 }

@@ -5,6 +5,8 @@ import Timer from '@deepseek-ai/cordis-plugin-timer'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentListEntry } from '@deepseek-ai/dsh-subagent'
+import LlmRuntime, { LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { CallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionStore from '@deepseek-ai/dsh-session'
@@ -21,7 +23,7 @@ import * as tui from '../src/index.ts'
 const SESSION = 'session-tui-plugin'
 
 /** A terminal that records what the renderer wrote instead of touching a TTY. */
-function fakeTerminal(): Terminal & { written: string[]; title: string | undefined; input: (data: string) => void } {
+function fakeTerminal(rows = 24): Terminal & { written: string[]; title: string | undefined; input: (data: string) => void } {
   let onInput: (data: string) => void = () => {}
   const terminal = {
     written: [] as string[],
@@ -32,7 +34,7 @@ function fakeTerminal(): Terminal & { written: string[]; title: string | undefin
     drainInput: () => Promise.resolve(),
     write(data: string): void { terminal.written.push(data) },
     get columns(): number { return 80 },
-    get rows(): number { return 24 },
+    get rows(): number { return rows },
     get kittyProtocolActive(): boolean { return false },
     moveBy(): void {}, hideCursor(): void {}, showCursor(): void {},
     clearLine(): void {}, clearFromCursor(): void {}, clearScreen(): void {},
@@ -364,7 +366,7 @@ describe('dsh-tui mounting', () => {
     const fiber = await ctx.plugin(tui, { session: SESSION, color: false })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(ctx.commands.list(agent).map(command => command.name))
-      .toEqual(expect.arrayContaining(['exit', 'quit', 'help']))
+      .toEqual(expect.arrayContaining(['exit', 'quit', 'help', 'model']))
 
     await fiber.dispose()
 
@@ -833,5 +835,265 @@ describe('dsh-tui keyboard', () => {
     terminal.input('\x0f')
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(screen(terminal)).toContain('4')
+  })
+})
+
+/** An adapter advertising a fixed catalog, the registry `/model` reads. */
+class CatalogAdapter extends LlmAdapter {
+  constructor(private readonly models: readonly LlmModelInfo[]) {
+    super()
+  }
+
+  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    return Promise.resolve(this.models.map(model => ({ ...model, provider })))
+  }
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({ provider, id: model, name: model })
+  }
+
+  override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
+    // The /model suite never enters provider streaming.
+  }
+}
+
+const CATALOG: readonly LlmModelInfo[] = [
+  { provider: 'deepseek-official', id: 'deepseek-chat', name: 'DeepSeek Chat' },
+  { provider: 'deepseek-official', id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' },
+]
+
+/** A route a seeded session log records, the resume shape the read path restores. */
+interface LoggedRoute {
+  provider: string
+  model: string
+  reasoningEffort?: ReasoningEffortId
+}
+
+/**
+ * Mount the front door with the command registry and the llm registry, the
+ * composition `/model` needs. `loggedRoute` seeds the session log the way a
+ * resumed session arrives: a request header and route metadata for the route
+ * its last request actually used.
+ */
+async function mountWithCatalog(over: { llm?: boolean; rows?: number; loggedRoute?: LoggedRoute } = {}): Promise<{
+  ctx: Context
+  terminal: ReturnType<typeof fakeTerminal>
+  agent: Agent & { session: Session; followups: unknown[] }
+}> {
+  const terminal = fakeTerminal(over.rows ?? 24)
+  tui.internals.interactive = () => true
+  tui.internals.createTerminal = () => terminal
+  const ctx = new Context()
+  context = ctx
+  await ctx.plugin(Timer)
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(Commands)
+  if (over.llm !== false) {
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter(CATALOG))
+  }
+  const agent = registerAgent(ctx)
+  const logged = over.loggedRoute
+  if (logged !== undefined) {
+    agent.session.append('request/header', {
+      header: {
+        config: {
+          provider: logged.provider,
+          model: logged.model,
+          ...logged.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort },
+        },
+      },
+      reason: 'change',
+    })
+    agent.session.append('request/context', { provider: logged.provider, model: logged.model })
+  }
+  await ctx.plugin(tui, { session: SESSION, color: false })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  return { ctx, terminal, agent }
+}
+
+describe('dsh-tui /model', () => {
+  it('switches the route directly, and the footer and pane title follow', async () => {
+    const { ctx, terminal } = await mountWithCatalog()
+    expect(terminal.title).toBe('dsh — m')
+
+    const settled = await ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model deepseek-reasoner', new AbortController().signal)
+    expect(settled?.result).toMatchObject({ kind: 'success' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(screen(terminal)).toContain('deepseek-official/deepseek-reasoner')
+    expect(terminal.title).toBe('dsh — deepseek-reasoner')
+    expect(screen(terminal)).toContain('Model switched to deepseek-official/deepseek-reasoner')
+  })
+
+  it('refuses an unknown id loudly, naming what is available and keeping the route', async () => {
+    const { ctx, terminal } = await mountWithCatalog()
+    const settled = await ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model gpt-neo', new AbortController().signal)
+    expect(settled?.result).toEqual({
+      kind: 'error',
+      text: 'unknown model "gpt-neo"; available: deepseek-official/deepseek-chat, deepseek-official/deepseek-reasoner',
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('unknown model "gpt-neo"')
+    expect(terminal.title).toBe('dsh — m')
+  })
+
+  it('opens the picker under /model with no argument, and a keyboard pick applies', async () => {
+    const { ctx, terminal } = await mountWithCatalog()
+    const settled = ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model', new AbortController().signal)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('Model')
+    expect(screen(terminal)).toContain('1.   deepseek-official/deepseek-chat — DeepSeek Chat')
+    expect(screen(terminal)).toContain('2.   deepseek-official/deepseek-reasoner — DeepSeek Reasoner')
+    expect(screen(terminal)).toContain('↑↓ move')
+
+    terminal.input('2')
+    await expect(settled).resolves.toMatchObject({
+      result: { kind: 'success', text: 'Model switched to deepseek-official/deepseek-reasoner' },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('deepseek-official/deepseek-reasoner')
+    expect(terminal.title).toBe('dsh — deepseek-reasoner')
+  })
+
+  it('esc dismisses the picker without cancelling the turn or clearing queued work', async () => {
+    const { ctx, terminal, agent } = await mountWithCatalog()
+    const cancels: unknown[] = []
+    Object.assign(agent, {
+      status: 'running' as const,
+      cancel: (cause: unknown) => { cancels.push(cause) },
+    })
+    ;(agent.inbox.nextTurn as unknown[]).push({ queued: 'follow-up' })
+
+    const settled = ctx.commands.execute(agent, '/model', new AbortController().signal)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('enter apply')
+
+    terminal.input('\x1b')
+    await expect(settled).resolves.toMatchObject({ result: { kind: 'success' } })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // The esc reached the panel's dismiss path, never the agent's cancel: the
+    // queued follow-up survives and the route never moved.
+    expect(cancels).toEqual([])
+    expect(agent.inbox.nextTurn).toHaveLength(1)
+    expect(terminal.title).toBe('dsh — m')
+    // The dismissed picker released the keyboard: the editor answers again.
+    terminal.input('h')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('h')
+  })
+
+  it('refuses the picker on a 20x5 terminal without taking the keyboard', async () => {
+    const { ctx, terminal } = await mountWithCatalog({ rows: 5 })
+    const settled = await ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model', new AbortController().signal)
+    expect(settled?.result).toEqual({
+      kind: 'error',
+      text: 'the terminal is too small for the model picker; switch with /model <provider>/<model>',
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).not.toContain('enter apply')
+    terminal.input('h')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('h')
+  })
+
+  it('fails loud when the composition mounts no llm registry', async () => {
+    const { ctx, terminal } = await mountWithCatalog({ llm: false })
+    const settled = await ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model deepseek-chat', new AbortController().signal)
+    expect(settled?.result).toEqual({
+      kind: 'error',
+      text: 'no model directory is available: this composition mounts no llm service',
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(screen(terminal)).toContain('p/m')
+  })
+
+  it('lists /model beside the other terminal-owned commands', async () => {
+    const { ctx, agent } = await mountWithCatalog()
+    expect(ctx.commands.list(agent).map(command => command.name)).toEqual(
+      expect.arrayContaining(['model', 'help', 'exit', 'quit']),
+    )
+  })
+})
+
+describe('the terminal model selection read path', () => {
+  /** A registered agent over a real session, without mounting the screen. */
+  async function agentForSelection(): Promise<Agent & { session: Session }> {
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    return registerAgent(ctx)
+  }
+
+  it('falls to the creation pin, then the deployment default, on a blank session', async () => {
+    const agent = await agentForSelection()
+    expect(tui.liveSelection(agent, () => undefined).current).toEqual({ provider: 'p', model: 'm' })
+    expect(tui.liveSelection({ ...agent, options: {} }, () => ({ provider: 'd', model: 'e' })).current)
+      .toEqual({ provider: 'd', model: 'e' })
+    expect(tui.liveSelection({ ...agent, options: {} }, () => undefined).current).toBeUndefined()
+  })
+
+  it('restores the logged route over the pin and the default once the log has a header', async () => {
+    const agent = await agentForSelection()
+    agent.session.append('request/header', {
+      header: { config: { provider: 'logged', model: 'route', reasoningEffort: ReasoningEffortId('high') } },
+      reason: 'change',
+    })
+    expect(tui.liveSelection(agent, () => ({ provider: 'd', model: 'e' })).current).toEqual({
+      provider: 'logged',
+      model: 'route',
+      reasoningEffort: 'high',
+    })
+  })
+
+  it('outranks the log with a pick made in this process', async () => {
+    const agent = await agentForSelection()
+    agent.session.append('request/header', {
+      header: { config: { provider: 'logged', model: 'route' } },
+      reason: 'change',
+    })
+    const selection = tui.liveSelection(agent, () => undefined)
+    selection.current = { provider: 'picked', model: 'now' }
+    expect(selection.current).toEqual({ provider: 'picked', model: 'now' })
+  })
+
+  it('reads the deployment default live, so a save after creation reaches a blank session', async () => {
+    const agent = await agentForSelection()
+    const bare = { ...agent, options: {} }
+    let deployment: { provider: string; model: string } | undefined = { provider: 'd', model: 'e' }
+    const selection = tui.liveSelection(bare, () => deployment)
+    expect(selection.current).toEqual({ provider: 'd', model: 'e' })
+    deployment = { provider: 'later', model: 'save' }
+    expect(selection.current).toEqual({ provider: 'later', model: 'save' })
+  })
+
+  it('marks and titles the logged route on a resumed session, with no pick involved', async () => {
+    const { ctx, terminal } = await mountWithCatalog({
+      loggedRoute: { provider: 'deepseek-official', model: 'deepseek-reasoner' },
+    })
+    // The replayed route metadata names the footer and the pane title, not
+    // the launch pin the agent was created with.
+    expect(terminal.title).toBe('dsh — deepseek-reasoner')
+    expect(screen(terminal)).toContain('deepseek-official/deepseek-reasoner')
+
+    const pending = ctx.commands.execute((ctx.agents.get(SessionId(SESSION)) as Agent), '/model', new AbortController().signal)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('● deepseek-official/deepseek-reasoner')
+    terminal.input('\x1b')
+    await pending
+    await ctx.fiber.dispose()
+  })
+
+  it('restates the pane title when a live request/context names a different route', async () => {
+    const { ctx, terminal, agent } = await mountWithCatalog()
+    expect(terminal.title).toBe('dsh — m')
+    agent.session.append('request/context', { provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(terminal.title).toBe('dsh — deepseek-reasoner')
+    await ctx.fiber.dispose()
   })
 })
