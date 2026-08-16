@@ -29,8 +29,11 @@ export interface PanelHost {
   requestRender(): void
 }
 
-/** How many options a number key can reach directly. */
-const DIRECT_SELECT_LIMIT = 9
+/**
+ * How many options a number key can reach directly, across the keyboard
+ * panels this package draws.
+ */
+export const DIRECT_SELECT_LIMIT = 9
 
 /** One question's in-progress answer. */
 export interface ItemState {

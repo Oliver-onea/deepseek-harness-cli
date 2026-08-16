@@ -216,6 +216,27 @@ describe('TerminalShell', () => {
     expect(shell.model).toBe('n')
   })
 
+  it('notes a route chosen ahead of its request and drops the old context capacity', () => {
+    const { shell, tui, agent } = shellFor()
+    shell.start()
+    shell.observe(agent.session.append('request/context', { provider: 'q', model: 'n', contextWindow: 1000 }))
+    const withCapacity = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(withCapacity).toContain('q/n')
+    expect(withCapacity).toContain('(0%)')
+
+    shell.noteRoute('r', 'o')
+    const noted = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(noted).toContain('r/o')
+    expect(noted).toContain('0 tokens')
+    expect(noted).not.toContain('(0%)')
+
+    // The request that consumes the new route restates the capacity it runs on.
+    shell.observe(agent.session.append('request/context', { provider: 'r', model: 'o', contextWindow: 2000 }))
+    const served = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(served).toContain('r/o')
+    expect(served).toContain('(0%)')
+  })
+
   it('falls back to the deployment default route, then to a placeholder', () => {
     const tui = fakeTui()
     const bare = { ...fakeAgent(), options: {} } as unknown as Agent

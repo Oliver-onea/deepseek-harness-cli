@@ -32,6 +32,7 @@ import type {} from '@deepseek-ai/dsh-token-meter'
 import { installApprovalAnswerer } from './approval.ts'
 import { childDisplayName, childRunning, type RunningChild } from './autocomplete.ts'
 import { helpText } from './command-help.ts'
+import { runModelCommand } from './model-picker.ts'
 import { TerminalQuestions } from './questions.ts'
 import { createPalette } from './theme.ts'
 import { TerminalShell, paneTitle } from './shell.ts'
@@ -230,9 +231,10 @@ export function createPresenter(ctx: Context, agent: Agent): ToolPresenter {
 }
 
 /**
- * Resolve the route this session's requests use: what the composition
- * configured for this agent, else the deployment default. A route with neither
- * leaves the selection unset, and the adapter's own default answers.
+ * Resolve the route this session's requests use when nothing stronger names
+ * one: what the composition configured for this agent, else the deployment
+ * default. A route with neither leaves the selection unset, and the adapter's
+ * own default answers.
  * @param agent - the agent this terminal drives.
  * @param fallback - the deployment default selection, when a service supplies one.
  * @returns the selection to install, or `undefined` when nothing names a route.
@@ -244,6 +246,42 @@ export function resolveSelection(
   const { provider, model } = agent.options
   if (provider === undefined || model === undefined) return fallback
   return { provider, model }
+}
+
+/**
+ * Build the model selection this terminal installs on its agent, resolved on
+ * every read: a pick made in this process, else the session's last logged
+ * request header, else the creation pin or deployment default. The live read
+ * restores a resumed session's switched route from its log — the precedence
+ * the web surface's selection follows — and lets a blank session read a
+ * default saved after it was created.
+ * @param agent - the agent this terminal drives.
+ * @param defaultRoute - the deployment default, read live on every read.
+ * @returns the mutable selection prompt assembly snapshots.
+ */
+export function liveSelection(
+  agent: Agent,
+  defaultRoute: () => ModelSelection | undefined,
+): ModelSelectionRef {
+  let picked: ModelSelection | undefined
+  return {
+    get current(): ModelSelection | undefined {
+      if (picked !== undefined) return picked
+      const logged = agent.session.requestHeader()?.config
+      if (logged !== undefined) {
+        return {
+          provider: logged.provider,
+          model: logged.model,
+          ...logged.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort },
+        }
+      }
+      return resolveSelection(agent, defaultRoute())
+    },
+    set current(next: ModelSelection | undefined) {
+      picked = next
+    },
+    assembled: undefined,
+  }
 }
 
 /**
@@ -278,12 +316,10 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const palette = createPalette(settings.color)
   const defaultRoute = ctx.get('agentDefaultModel')?.currentSelection()
   // The selection is agent-scoped state this front door owns: it fills the
-  // persona's `{{provider}}`/`{{model}}` variables and routes each request, and
-  // it is where a terminal model picker would write.
-  const selection: ModelSelectionRef = {
-    current: resolveSelection(agent, defaultRoute),
-    assembled: undefined,
-  }
+  // persona's `{{provider}}`/`{{model}}` variables and routes each request.
+  // A pick writes it; a resumed session's log outranks the launch pin; the
+  // deployment default answers when neither names a route.
+  const selection = liveSelection(agent, () => ctx.get('agentDefaultModel')?.currentSelection())
   installModelSelection(agent.ctx, selection)
   const terminal = internals.createTerminal()
   const tui: ViewportTUI = new TuiAltScreen(terminal)
@@ -292,6 +328,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const permissionPresets = ctx.get('permissionPresets')
   const commands = ctx.get('commands')
   const subagents = ctx.get('subagents')
+  const llm = ctx.get('llm')
   const shell = new TerminalShell({
     tui,
     agent,
@@ -332,15 +369,21 @@ async function start(ctx: Context, config: Config): Promise<void> {
     terminal.setTitle(paneTitle(shell.model))
     yield () => { tui.stop() }
   }, 'dsh-tui.screen')
+  /** Restate the pane title after every route change the shell knows about. */
+  const syncTitle = (): void => { terminal.setTitle(paneTitle(shell.model)) }
 
   // Replay the durable log the host resumed before following live appends, so
-  // the reader sees the conversation they are continuing.
+  // the reader sees the conversation they are continuing. The replayed
+  // request/context restates the route the session actually used last, so the
+  // footer and pane title name it rather than the launch pin.
   for (const event of agent.session.events) shell.observe(event)
   shell.refreshStatus()
+  syncTitle()
 
   ctx.on('session/event', (session, event: SessionEvent) => {
     if (session !== agent.session) return
     shell.observe(event)
+    if (event.type === 'request/context') syncTitle()
   })
   ctx.on('agent/status', (payload) => {
     if (payload.agent === agent) shell.refreshStatus()
@@ -376,6 +419,30 @@ async function start(ctx: Context, config: Config): Promise<void> {
         kind: 'success',
         text: helpText(scope.commands.list(receiving)),
       }),
+    })
+    // The switch acts on this terminal's own agent and the selection this
+    // front door installed, not on whichever agent's UI dispatched the line.
+    scope.commands.register({
+      name: 'model',
+      description: 'Show or switch the model this session uses',
+      input: { hint: '[provider/model]' },
+      handler: ({ rawInput }) => runModelCommand({
+        llm,
+        selection,
+        host: shell,
+        palette,
+        rows: () => terminal.rows,
+        maxVisible: settings.maxSuggestions,
+        imageSurface: () => ({
+          pending: [...agent.inbox.nextTurn, ...agent.inbox.nextStep],
+          logged: agent.session.deriveMessages(),
+        }),
+        persist: next => Promise.resolve(ctx.get('agentDefaultModel')?.saveSelection(next)),
+        onApplied: (provider, model) => {
+          shell.noteRoute(provider, model)
+          syncTitle()
+        },
+      }, rawInput),
     })
   })
 

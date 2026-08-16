@@ -219,6 +219,19 @@ export class TerminalShell implements PanelHost {
     return this.route.model
   }
 
+  /**
+   * Record a route chosen ahead of the request that will log it: the footer
+   * names the new route immediately, and the old route's advertised context
+   * capacity stops applying until the next request states the new one.
+   * @param provider - the provider route subsequent requests carry.
+   * @param model - the model id subsequent requests carry.
+   */
+  noteRoute(provider: string, model: string): void {
+    this.route = { provider, model }
+    this.contextWindow = undefined
+    this.refreshStatus()
+  }
+
   /** Ask the renderer to draw again. */
   requestRender(): void {
     this.options.tui.requestRender()
