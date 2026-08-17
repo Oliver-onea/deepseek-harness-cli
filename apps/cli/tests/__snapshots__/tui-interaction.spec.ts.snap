@@ -1,5 +1,38 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`dsh terminal journey snapshots > / menu lists a staged skill and a pick submits it as a prompt 1`] = `
+"› /journey-skill
+
+Mock model answering the terminal.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 13.2k/1000.0k (1%) · /help  ctrl+c
+ exit"
+`;
+
 exports[`dsh terminal journey snapshots > /help lists the live command registry as text 1`] = `
 "/compact — Compact older conversation history
 /exit — Leave the terminal session
@@ -95,6 +128,39 @@ exports[`dsh terminal journey snapshots > @ menu offers a running child and a pi
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  @journey-child x
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > @ menu offers nothing when no child is running 1`] = `
+"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ @
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
 `;
