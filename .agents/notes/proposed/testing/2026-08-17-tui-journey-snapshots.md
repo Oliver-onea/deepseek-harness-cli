@@ -56,6 +56,18 @@ env -u FORCE_COLOR -u NO_COLOR pnpm vitest run apps/cli/tests/tui-interaction.sp
 
 Result: 10/10 passed.
 
+## Alternatives considered
+
+**A real model turn to produce the `@` child.** Rejected: it needs a key and makes the roster non-deterministic, which defeats a snapshot. The fixture creates a live child in the session store instead, so `subagents.listChildren` returns it through the same path production uses.
+
+**A stubbed subagent roster.** Rejected: a snapshot that fakes the state it claims to prove is worse than an absent one. Staging real session-store state keeps the assertion about the wiring, not about the stub.
+
+**`/exit` for teardown in the `@` case.** Rejected: that case deliberately leaves `@journey-child x` in the composer, so `/exit` would append to the line rather than run the command. `cancel()` sends `ctrl+c`, which exits cleanly when no turn is running.
+
+**Asserting raw PTY bytes rather than a rendered grid.** Rejected: pi-tui's differential rendering and synchronized output make byte order an implementation detail, so byte-level assertions would break on redraw changes that a reader never sees. The emulator interprets and strips ANSI so the snapshot pins what a person reads.
+
+**Wall-clock sleeps between keystrokes.** Rejected as the usual source of CI flake. `waitUntil(predicate)` was added for conditions that are awkward to express as text, such as the model picker having left the screen.
+
 ## Acceptance criteria
 
 - Journey snapshots exist for `/`, `/help`, `@`, and `/model` and pass keylessly.
