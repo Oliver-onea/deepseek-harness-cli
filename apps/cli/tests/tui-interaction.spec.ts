@@ -17,6 +17,7 @@ import { createTuiHarness, DEFAULT_BOOT_TIMEOUT_MS, DEFAULT_TURN_TIMEOUT_MS } fr
 const ANSWER = 'Mock model answering the terminal.'
 
 const STAGE_CHILD_PLUGIN = fileURLToPath(new URL('./fixtures/tui-journey/stage-subagent-child.ts', import.meta.url))
+const STAGE_SKILL_PLUGIN = fileURLToPath(new URL('./fixtures/tui-journey/stage-skill.ts', import.meta.url))
 
 /**
  * Normalize screen output for snapshot stability. Elapsed seconds in the
@@ -41,6 +42,22 @@ function createStageChildPatch(): { patch: string; dir: string } {
     '- insert:',
     '    - id: tui-journey-stage-child',
     `      name: ${pathToFileURL(STAGE_CHILD_PLUGIN).href}`,
+    '',
+  ].join('\n'))
+  return { patch, dir }
+}
+
+/**
+ * Build a temporary Cordis patch that inserts the skill staging plugin, so the
+ * `/` menu can list a real user-invocable skill without a model turn.
+ */
+function createStageSkillPatch(): { patch: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-tui-journey-patch-'))
+  const patch = join(dir, 'cordis.patch.yml')
+  writeFileSync(patch, [
+    '- insert:',
+    '    - id: tui-journey-stage-skill',
+    `      name: ${pathToFileURL(STAGE_SKILL_PLUGIN).href}`,
     '',
   ].join('\n'))
   return { patch, dir }
@@ -154,6 +171,50 @@ describe('dsh terminal journey snapshots', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 3)
+
+  it('@ menu offers nothing when no child is running', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+      harness.type('@')
+      // With no running child the menu never opens, so the `@` stays in the
+      // composer and no roster text appears.
+      await harness.waitFor('@', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitUntil(
+        screen => !screen.includes('journey-child'),
+        DEFAULT_TURN_TIMEOUT_MS,
+      )
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.cancel()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 2)
+
+  it('/ menu lists a staged skill and a pick submits it as a prompt', async () => {
+    const { patch, dir } = createStageSkillPatch()
+    const harness = createTuiHarness({
+      baseUrl: server?.baseURL ?? '',
+      args: ['--patch', patch],
+    })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+      harness.type('/jou')
+      await harness.waitFor('journey-skill', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitFor('A staged skill for journey snapshots', DEFAULT_TURN_TIMEOUT_MS)
+      harness.key('enter')
+      // A skill pick is not a command, so the line ships to the model verbatim
+      // and the mock answers it; the transcript shows the user prompt and the
+      // assistant response.
+      await harness.waitFor('/journey-skill', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitFor(ANSWER, DEFAULT_TURN_TIMEOUT_MS)
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 4)
 
   it('/model opens the picker, esc dismisses, and enter applies', async () => {
     const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
