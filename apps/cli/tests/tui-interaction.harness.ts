@@ -25,7 +25,7 @@ interface PtyProcess {
   write(data: string): void
   kill(signal?: string): void
   onData(listener: (data: string) => void): void
-  onExit(listener: (event: { exitCode: number }) => void): void
+  onExit(listener: (event: { exitCode: number; signal?: number }) => void): void
   resize(cols: number, rows: number): void
 }
 
@@ -318,6 +318,18 @@ export const DEFAULT_BOOT_TIMEOUT_MS = 60_000
 export const DEFAULT_TURN_TIMEOUT_MS = 30_000
 
 /**
+ * Quiet period required before teardown writes.
+ *
+ * The CLI boot finishes with async post-render setup (profile watcher
+ * registration). Sending `/exit` or `ctrl+c` while that setup is still in
+ * flight can leave the top-level `await runProfile(...)` unsettled, so Node
+ * exits with code 13. Waiting for the PTY to be idle for this interval lets
+ * the event loop drain those startup microtasks without masking a real
+ * non-zero exit code.
+ */
+const TEARDOWN_QUIET_MS = 100
+
+/**
  * Launch the shipped terminal profile under a real PTY and return a harness.
  *
  * The harness uses the keyless mock model at `options.baseUrl`. The caller is
@@ -363,8 +375,20 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
   )
 
   const waiters: { predicate: (text: string) => boolean; resolve: () => void }[] = []
+  let lastDataAt = Date.now()
+  let quiesceTimer: ReturnType<typeof setTimeout> | undefined
+  let quiesceResolve: (() => void) | undefined
 
   child.onData((data) => {
+    lastDataAt = Date.now()
+    if (quiesceResolve !== undefined) {
+      clearTimeout(quiesceTimer)
+      quiesceTimer = setTimeout(() => {
+        const resolve = quiesceResolve
+        quiesceResolve = undefined
+        resolve?.()
+      }, TEARDOWN_QUIET_MS)
+    }
     screen.feed(data)
     const plain = screen.plain()
     for (const waiter of waiters.splice(0)) {
@@ -373,11 +397,36 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     }
   })
 
+  let exited = false
   const exitCode = new Promise<number>((resolve) => {
     child.onExit(({ exitCode: code }) => {
+      exited = true
       resolve(code)
     })
   })
+
+  function safeWrite(data: string): void {
+    if (exited) return
+    try {
+      child.write(data)
+    } catch {
+      // The child exited between the guard and the write; the exit code
+      // captured by `exitCode` is the authoritative outcome.
+    }
+  }
+
+  function quiesce(): Promise<void> {
+    if (exited) return Promise.resolve()
+    const elapsed = Date.now() - lastDataAt
+    if (elapsed >= TEARDOWN_QUIET_MS) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      quiesceResolve = resolve
+      quiesceTimer = setTimeout(() => {
+        quiesceResolve = undefined
+        resolve()
+      }, TEARDOWN_QUIET_MS - elapsed)
+    })
+  }
 
   function waitFor(predicate: (text: string) => boolean, timeoutMs: number): Promise<void> {
     const plain = screen.plain()
@@ -415,11 +464,13 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
       return screen.ansi()
     },
     async exit(): Promise<number> {
-      child.write('/exit\r')
+      await quiesce()
+      safeWrite('/exit\r')
       return await exitCode
     },
     async cancel(): Promise<number> {
-      child.write('\x03')
+      await quiesce()
+      safeWrite('\x03')
       return await exitCode
     },
     async dispose(): Promise<number> {

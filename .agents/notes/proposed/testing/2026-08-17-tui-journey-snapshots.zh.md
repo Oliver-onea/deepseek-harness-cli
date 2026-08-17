@@ -106,4 +106,5 @@ env -u FORCE_COLOR -u NO_COLOR pnpm vitest run apps/cli/tests/tui-interaction.sp
 
 - 已关闭：`@` 空列表场景现在由不带子会话上台 patch 的专用快照覆盖。
 - 已关闭：`/` skill 来源场景现在由带有真实 runtime skill 的专用快照覆盖。
-- 仍开放：现有的 `/help` 快照在重度聚合套件竞争下偶尔以信号 13（SIGPIPE）退出。快照本身匹配；抖动发生在该特定测试的 PTY 拆解阶段，且在基线分支上即已存在。该问题在单独运行该文件时不会复现，因此在此记录，而不是用一个会掩盖 harness 行为的变通方案来覆盖。
+- 已关闭：`/help` 拆解抖动并非 SIGPIPE，而是启动/退出竞态。插桩显示子进程以 code 13 退出，且 Node 打印 `Warning: Detected unsettled top-level await at apps/cli/src/bin.ts:33`。在聚合套件竞争下，harness 在 `profile-boot.ts` 仍在等待启动后 watcher 设置时发送 `/exit`，导致顶层 `await runProfile(...)` 在进程退出时仍未完成。harness 现在会在拆解写入前等待 PTY 空闲 `TEARDOWN_QUIET_MS`，并在子进程已退出时跳过写入，既给 CLI 完成启动的时间，也不掩盖真正的非零退出。已通过下方聚合命令验证。
+  - `env -u FORCE_COLOR -u NO_COLOR pnpm vitest run packages/ui/tui packages/bundle/tui-app apps/cli/tests/tui-interaction.spec.ts`：**10/10 通过**。
