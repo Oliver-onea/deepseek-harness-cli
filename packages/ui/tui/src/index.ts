@@ -27,10 +27,11 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-plan-mode'
+import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { installApprovalAnswerer } from './approval.ts'
-import { childDisplayName, childRunning, type RunningChild } from './autocomplete.ts'
+import { childDisplayName, childRunning, type MenuSkill, type RunningChild } from './autocomplete.ts'
 import { helpText } from './command-help.ts'
 import { runModelCommand } from './model-picker.ts'
 import { TerminalQuestions } from './questions.ts'
@@ -327,6 +328,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const planMode = ctx.get('planMode')
   const permissionPresets = ctx.get('permissionPresets')
   const commands = ctx.get('commands')
+  const skills = ctx.get('skills')
   const subagents = ctx.get('subagents')
   const llm = ctx.get('llm')
   const shell = new TerminalShell({
@@ -352,6 +354,17 @@ async function start(ctx: Context, config: Config): Promise<void> {
     defaultRoute,
     autocomplete: {
       commands: commands === undefined ? () => [] : () => commands.list(agent),
+      // The catalog read resolves the agent's own scope chain and project cwd,
+      // the same lookup the web host serves as `skill.list`; only
+      // user-invocable skills reach the menu, because only those answer a
+      // pick. Reads ride the registry's revision-keyed cache, so a skill
+      // registered or removed after the screen is up shows on the next query.
+      skills: skills === undefined ? undefined : async (signal): Promise<readonly MenuSkill[]> => {
+        const listed = await skills.list({ cwd: agent.session.header.cwd, signal, scope: agent })
+        return listed.flatMap(skill => skill.invocation.userInvocable
+          ? [{ name: skill.name, description: skill.description, modelInvocable: skill.invocation.modelInvocable }]
+          : [])
+      },
       subagents: subagents === undefined ? undefined : async (signal): Promise<readonly RunningChild[]> => {
         const children = await subagents.listChildren(agent.session.id, signal)
         return children.flatMap((entry) => {

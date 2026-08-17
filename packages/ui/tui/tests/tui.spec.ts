@@ -17,6 +17,7 @@ import UserApproval from '@deepseek-ai/dsh-user-approval'
 import UserQuestions from '@deepseek-ai/dsh-user-questions'
 import GoalService from '@deepseek-ai/dsh-goal'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import * as tui from '../src/index.ts'
 
@@ -348,6 +349,165 @@ describe('dsh-tui mounting', () => {
     expect(listed).toContain('/demo-late — registered after the screen is up')
     dispose()
     expect(ctx.commands.list(agent).map(command => command.name)).not.toContain('demo-late')
+  })
+
+  it('lists a skill registered after the terminal mounted, and drops it when its registration disposes', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SkillRegistry)
+    const agent = registerAgent(ctx)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const dispose = ctx.skills.register({
+      name: 'commit-helper',
+      description: 'Git commits the staged work',
+      content: 'Run the commit steps.',
+      source: 'runtime',
+    })
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // The live catalog read serves the next query without a restart, beside
+    // the registry's commands.
+    expect(screen(terminal)).toContain('commit-helper')
+    expect(screen(terminal)).toContain('Git commits the staged work')
+    terminal.input('\x1b')
+
+    dispose()
+    expect(await ctx.skills.list({ scope: agent })).toEqual([])
+  })
+
+  it('marks a user-only skill and omits a model-only one from the slash menu', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SkillRegistry)
+    registerAgent(ctx)
+    ctx.skills.register({
+      name: 'sign-off',
+      description: 'Sign the release',
+      content: 'Sign it.',
+      source: 'runtime',
+      invocation: { modelInvocable: false, userInvocable: true },
+    })
+    ctx.skills.register({
+      name: 'auto-test',
+      description: 'Model-side testing flows',
+      content: 'Test it.',
+      source: 'runtime',
+      invocation: { modelInvocable: true, userInvocable: false },
+    })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('user-only — Sign the release')
+    expect(screen(terminal)).not.toContain('Model-side testing flows')
+    terminal.input('\x1b')
+  })
+
+  it('escapes control bytes in a skill description before they reach the screen', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SkillRegistry)
+    registerAgent(ctx)
+    ctx.skills.register({
+      name: 'evil-skill',
+      description: 're\x1b]0;hijack\x07paint',
+      content: 'Do things.',
+      source: 'runtime',
+    })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen(terminal)).toContain('re\\x1b]0;hijack\\x07paint')
+    terminal.input('\x1b')
+  })
+
+  it('offers no skill rows when the composition mounts no skill capability', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    registerAgent(ctx)
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    terminal.input('/')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // Commands stand alone; nothing about the absent capability errors.
+    expect(screen(terminal)).toContain('List the commands this terminal resolves')
+    expect(screen(terminal)).not.toContain('user-only')
+    terminal.input('\x1b')
+  })
+
+  it('submits a picked skill as a prompt, not through the command registry', async () => {
+    const terminal = fakeTerminal()
+    tui.internals.interactive = () => true
+    tui.internals.createTerminal = () => terminal
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(Timer)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Commands)
+    await ctx.plugin(SkillRegistry)
+    const agent = registerAgent(ctx)
+    ctx.skills.register({
+      name: 'commit-helper',
+      description: 'Git commits the staged work',
+      content: 'Run the commit steps.',
+      source: 'runtime',
+    })
+    await ctx.plugin(tui, { session: SESSION, color: false })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    for (const character of '/commit-helper') terminal.input(character)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    terminal.input('\r')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // The pick completed to `/commit-helper ` and submitted; the registry
+    // resolves no such command, so the line ships to the model verbatim.
+    expect(agent.followups).toHaveLength(1)
+    const message = agent.followups[0] as { content: { type: string; text: string }[] }
+    expect(message.content).toEqual([{ type: 'text', text: '/commit-helper' }])
+    const types = agent.session.events.map(event => event.type)
+    expect(types).not.toContain('command/run')
   })
 
   it('removes every terminal-owned command when the plugin fiber disposes', async () => {

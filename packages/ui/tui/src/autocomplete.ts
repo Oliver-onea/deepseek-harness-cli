@@ -1,9 +1,10 @@
 /**
  * The input-trigger menus: `/` offers the commands the live registry resolves
- * for this agent, `@` offers its running subagent children. Candidate
- * sourcing reads live rosters per query; suggestion state, debouncing,
- * keyboard arbitration, and rendering belong to pi-tui's editor, and this
- * provider bounds the menu to the terminal's rows.
+ * for this agent plus the user-invocable skills its composition serves, `@`
+ * offers its running subagent children. Candidate sourcing reads live rosters
+ * per query; suggestion state, debouncing, keyboard arbitration, and
+ * rendering belong to pi-tui's editor, and this provider bounds the menu to
+ * the terminal's rows.
  * @module @deepseek-ai/dsh-tui/autocomplete
  */
 
@@ -20,10 +21,26 @@ export interface RunningChild {
   readonly name: string
 }
 
+/** One user-invocable skill the `/` menu may offer. */
+export interface MenuSkill {
+  /** Kebab-case skill name: sanitized before it reaches the editor. */
+  readonly name: string
+  /** Routing description: sanitized before it reaches the editor. */
+  readonly description: string
+  /** Whether the model catalog also lists this skill; a user-only skill marks its description. */
+  readonly modelInvocable: boolean
+}
+
 /** Everything the input-trigger menus read. */
 export interface AutocompleteOptions {
   /** Live command descriptors for the `/` menu, read on every query. */
   commands: () => readonly CommandDescriptor[]
+  /**
+   * The user-invocable skill catalog for the `/` menu, when the composition
+   * mounts the skill capability, read on every query; `undefined` leaves `/`
+   * listing commands alone.
+   */
+  skills?: ((signal: AbortSignal) => Promise<readonly MenuSkill[]>) | undefined
   /**
    * Running subagent children of the driven session, when the composition
    * mounts the subagent capability; `undefined` leaves `@` offering nothing.
@@ -86,6 +103,27 @@ export function commandItems(commands: readonly CommandDescriptor[]): Autocomple
 }
 
 /**
+ * Map the user-invocable skill catalog to `/`-menu candidates, with the
+ * untrusted catalog text normalized for display — skill names and
+ * descriptions are user- and model-authored. A skill the model catalog never
+ * lists carries the `user-only` marker on its description, the menu's only
+ * secondary text.
+ * @param skills - the user-invocable catalog the composition serves this agent.
+ * @returns the skill candidates for the `/` menu.
+ */
+export function skillItems(skills: readonly MenuSkill[]): AutocompleteItem[] {
+  return skills.map((skill) => {
+    const name = displayLine(skill.name)
+    const description = displayLine(skill.description)
+    return {
+      value: name,
+      label: name,
+      description: skill.modelInvocable ? description : `user-only — ${description}`,
+    }
+  })
+}
+
+/**
  * The display name of one subagent child: the durable session title when the
  * child has a live agent, else the creation label, else the raw id — matching
  * the web session list's title-first ladder.
@@ -131,9 +169,9 @@ export function atTokenOf(beforeCursor: string): string | null {
 /**
  * The terminal's input-trigger menus over pi-tui's editor: a flat candidate
  * list per trigger, live-roster sourced, with untrusted text normalized
- * before the editor can draw it. The command roster is read per query, so a
- * command registered after this provider was installed appears in the next
- * `/` query without a restart.
+ * before the editor can draw it. The command roster and skill catalog are
+ * read per query, so a command or skill registered after this provider was
+ * installed appears in the next `/` query without a restart.
  */
 export class TerminalAutocomplete implements AutocompleteProvider {
   /** The `@` subagent trigger; `/` is built into the editor itself. */
@@ -147,7 +185,8 @@ export class TerminalAutocomplete implements AutocompleteProvider {
   /**
    * Serve one query: bound the menu to the terminal's rows, then answer the
    * trigger under the cursor — `@` from the running-children roster, `/` at
-   * the start of the input from the live command registry.
+   * the start of the input from the live command registry and, when composed,
+   * the user-invocable skill catalog.
    * @param lines - the editor's lines at query time.
    * @param cursorLine - the cursor's line index.
    * @param cursorCol - the cursor's column.
@@ -168,12 +207,40 @@ export class TerminalAutocomplete implements AutocompleteProvider {
     const atToken = atTokenOf(beforeCursor)
     if (atToken !== null) return this.subagentSuggestions(atToken, options.signal)
     if (cursorLine === 0 && beforeCursor.trimStart().startsWith('/') && !beforeCursor.includes(' ')) {
-      const items = fuzzyFilter(commandItems(this.options.commands()), beforeCursor.trimStart().slice(1), item => item.value)
+      const items = await this.slashItems(beforeCursor.trimStart().slice(1), options.signal)
       return items.length === 0 ? null : { items, prefix: beforeCursor.trimStart() }
     }
     // No trigger under the cursor, a `/` on a later line, or a command line
     // already past its name: nothing offers.
     return null
+  }
+
+  /**
+   * Answer one `/` query from the live command roster and, when the
+   * composition mounts the skill capability, the user-invocable skill
+   * catalog — commands first, then skills, the web surface's source order.
+   * A skill catalog the composition did not mount, or one whose read fails,
+   * leaves the commands standing alone.
+   * @param query - the query typed after the `/`.
+   * @param signal - the query's abort signal, forwarded to the catalog read.
+   * @returns the matching candidates, or an empty list when the query went stale.
+   */
+  private async slashItems(query: string, signal: AbortSignal): Promise<AutocompleteItem[]> {
+    const items = commandItems(this.options.commands())
+    const skills = this.options.skills
+    if (skills !== undefined) {
+      let listed: readonly MenuSkill[] = []
+      try {
+        listed = await skills(signal)
+      } catch {
+        // A catalog read that fails offers no skill rows this query; the
+        // skill capability's own operations fail loud through their callers.
+        listed = []
+      }
+      if (signal.aborted) return []
+      items.push(...skillItems(listed))
+    }
+    return fuzzyFilter(items, query, item => item.value)
   }
 
   /**
@@ -207,10 +274,12 @@ export class TerminalAutocomplete implements AutocompleteProvider {
   }
 
   /**
-   * Apply a picked candidate in the editor buffer. A `/` pick completes to
-   * the command line; an `@` pick inserts the reference `@name ` — the same
-   * literal the web draft carries, trailing space closing the token — which
-   * then ships to the model verbatim as ordinary prompt text.
+   * Apply a picked candidate in the editor buffer. A `/` pick — command or
+   * skill — completes to the `/name ` line; an `@` pick inserts the reference
+   * `@name ` — the same literal the web draft carries, trailing space closing
+   * the token. Submission decides what the line is: a command the registry
+   * resolves dispatches through it, and any other `/name` ships to the model
+   * verbatim as ordinary prompt text — the web surface's plain-text pick.
    * @param lines - the editor's lines at pick time.
    * @param cursorLine - the cursor's line index.
    * @param cursorCol - the cursor's column.

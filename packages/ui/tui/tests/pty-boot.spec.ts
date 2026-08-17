@@ -233,9 +233,14 @@ describe('the dsh terminal profile under a real PTY', () => {
       terminal.type('/')
       await terminal.waitFor('compact', TURN_TIMEOUT_MS)
       await terminal.waitFor('Compact older conversation history', TURN_TIMEOUT_MS)
+      // The menu lists the project's skills beside the registry's commands:
+      // letters typed under the open menu narrow it to the one skill.
+      terminal.type('dsh-pre-pu')
+      await terminal.waitFor('dsh-pre-push-checks', TURN_TIMEOUT_MS)
+      await terminal.waitFor('Use before pushing', TURN_TIMEOUT_MS)
       terminal.type('\x1b')
       await new Promise(resolve => setTimeout(resolve, 200))
-      terminal.type('\x7f')
+      terminal.type('\x7f'.repeat('dsh-pre-pu'.length + 1))
       await new Promise(resolve => setTimeout(resolve, 200))
 
       const requestsBefore = server?.requests.length ?? 0
@@ -251,7 +256,37 @@ describe('the dsh terminal profile under a real PTY', () => {
     } finally {
       terminal.kill()
     }
-  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 4)
+
+  it('picks a skill under / and the invocation reaches the model', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+      // Narrow the menu to the project skill and confirm the pick: the
+      // completed `/name ` line submits, the registry resolves no such
+      // command, and the prompt ships verbatim.
+      harness.type('/dsh-pre-push')
+      await harness.waitFor('dsh-pre-push-checks', TURN_TIMEOUT_MS)
+      const before = server?.requests.length ?? 0
+      harness.key('enter')
+      // The first request may be title generation, which already carries the
+      // gesture text verbatim; the conversation request carries the injection.
+      const injected = (): string => {
+        for (const request of server?.requests.slice(before) ?? []) {
+          const body = JSON.stringify(request.body)
+          if (body.includes('<skill_content name=')) return body
+        }
+        return ''
+      }
+      await when(() => injected() !== '', TURN_TIMEOUT_MS)
+      // The host pre-step boundary answered the gesture: the rendered skill
+      // body rides the request beside the user's own words.
+      expect(injected()).toContain('/dsh-pre-push-checks')
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 2)
 
   it('esc with a menu open dismisses it and queued work still runs', async () => {
     const terminal = launch(server?.baseURL ?? '')
@@ -290,9 +325,10 @@ describe('the dsh terminal profile under a real PTY', () => {
       await terminal.waitFor('ready', BOOT_TIMEOUT_MS)
       terminal.type('/')
       await new Promise(resolve => setTimeout(resolve, 500))
-      // No room for a candidate row: the menu stays closed and the input row
-      // keeps its place.
+      // No room for a candidate row: the menu stays closed — no command and
+      // no skill row drew — and the input row keeps its place.
       expect(terminal.screen()).not.toContain('Compact older')
+      expect(terminal.screen()).not.toContain('dsh-pre-push')
       expect(terminal.screen()).toContain('/')
 
       terminal.type('exit')

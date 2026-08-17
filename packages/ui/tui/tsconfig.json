@@ -24,6 +24,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../skill/skill"
+    },
+    {
       "path": "../../session/session-title"
     },
     {

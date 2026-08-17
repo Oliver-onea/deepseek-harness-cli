@@ -9,7 +9,9 @@ import {
   childRunning,
   commandItems,
   menuRowsFor,
+  skillItems,
   TerminalAutocomplete,
+  type MenuSkill,
   type RunningChild,
 } from '../src/autocomplete.ts'
 
@@ -22,6 +24,7 @@ function signal(): AbortSignal {
 function buildMenus(over: {
   roster?: CommandDescriptor[]
   children?: readonly RunningChild[]
+  skills?: readonly MenuSkill[] | false
   rows?: number
   maxVisible?: number
   subagents?: boolean
@@ -29,6 +32,7 @@ function buildMenus(over: {
   provider: TerminalAutocomplete
   roster: CommandDescriptor[]
   children: readonly RunningChild[]
+  skills: MenuSkill[]
   synced: number[]
 } {
   const roster = over.roster ?? [
@@ -36,9 +40,13 @@ function buildMenus(over: {
     { name: 'exit', description: 'Leave the terminal session' },
   ]
   const children = over.children ?? []
+  const skills = over.skills === false ? [] : [...over.skills ?? []]
   const synced: number[] = []
   const autocomplete = new TerminalAutocomplete({
     commands: () => roster,
+    skills: over.skills === false
+      ? undefined
+      : async () => skills,
     subagents: over.subagents === false
       ? undefined
       : async () => children,
@@ -46,7 +54,7 @@ function buildMenus(over: {
     rows: () => over.rows ?? 24,
     syncMaxVisible: (visible) => { synced.push(visible) },
   })
-  return { provider: autocomplete, roster, children, synced }
+  return { provider: autocomplete, roster, children, skills, synced }
 }
 
 /** A listed child entry, as the subagent roster supplies one. */
@@ -105,6 +113,28 @@ describe('commandItems', () => {
   })
 })
 
+describe('skillItems', () => {
+  it('carries each skill, marking one the model catalog omits as user-only', () => {
+    expect(skillItems([
+      { name: 'commit-helper', description: 'Git commits', modelInvocable: true },
+      { name: 'sign-off', description: 'Sign the release', modelInvocable: false },
+    ])).toEqual([
+      { value: 'commit-helper', label: 'commit-helper', description: 'Git commits' },
+      { value: 'sign-off', label: 'sign-off', description: 'user-only — Sign the release' },
+    ])
+  })
+
+  it('normalizes catalog text that carries control characters', () => {
+    const [item] = skillItems([
+      { name: 'evil', description: 're\x1b]0;hijack\x07paint', modelInvocable: false },
+    ])
+    expect(item?.label).toBe('evil')
+    expect(item?.description).not.toContain('\x1b')
+    expect(item?.description).not.toContain('\x07')
+    expect(item?.description).toContain('\\x1b]0;hijack\\x07paint')
+  })
+})
+
 describe('childDisplayName', () => {
   it('prefers the durable session title over the creation label over the id', () => {
     const titled = childEntry({ label: 'creation label' })
@@ -150,6 +180,57 @@ describe('TerminalAutocomplete', () => {
     const suggestions = await provider.getSuggestions(['/co'], 0, 3, { signal: signal() })
     expect(suggestions).toMatchObject({ prefix: '/co', items: [{ value: 'compact' }] })
     expect(suggestions?.items[0]?.description).toBe('Summarize the conversation')
+  })
+
+  it('lists skills after commands under a slash prefix', async () => {
+    const { provider } = buildMenus({ skills: [{ name: 'commit-helper', description: 'Git commits', modelInvocable: true }] })
+    const suggestions = await provider.getSuggestions(['/'], 0, 1, { signal: signal() })
+    expect(suggestions?.items.map(item => item.value)).toEqual(['compact', 'exit', 'commit-helper'])
+    expect(suggestions?.items[2]?.description).toBe('Git commits')
+  })
+
+  it('offers the commands alone when the composition mounts no skill capability', async () => {
+    const { provider } = buildMenus({ skills: false })
+    const suggestions = await provider.getSuggestions(['/'], 0, 1, { signal: signal() })
+    expect(suggestions?.items.map(item => item.value)).toEqual(['compact', 'exit'])
+  })
+
+  it('narrows a slash query across commands and skills together', async () => {
+    const { provider } = buildMenus({ skills: [{ name: 'compact-reports', description: 'Fold reports', modelInvocable: true }] })
+    const suggestions = await provider.getSuggestions(['/comp'], 0, 5, { signal: signal() })
+    expect(suggestions?.items.map(item => item.value)).toEqual(['compact', 'compact-reports'])
+  })
+
+  it('reads the skill catalog live, so a later registration appears without a restart', async () => {
+    const { provider, skills } = buildMenus()
+    skills.push({ name: 'commit-helper', description: 'Git commits', modelInvocable: true })
+    const suggestions = await provider.getSuggestions(['/commit'], 0, 7, { signal: signal() })
+    expect(suggestions?.items.map(item => item.value)).toEqual(['commit-helper'])
+  })
+
+  it('offers the commands alone when the catalog read fails', async () => {
+    const provider = new TerminalAutocomplete({
+      commands: () => [{ name: 'exit', description: 'Leave the terminal session' }],
+      skills: () => Promise.reject(new Error('registry unavailable')),
+      maxVisible: 8,
+      rows: () => 24,
+      syncMaxVisible: () => {},
+    })
+    const suggestions = await provider.getSuggestions(['/'], 0, 1, { signal: signal() })
+    expect(suggestions?.items.map(item => item.value)).toEqual(['exit'])
+  })
+
+  it('offers nothing when the query aborted before the catalog answered', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const provider = new TerminalAutocomplete({
+      commands: () => [{ name: 'exit', description: 'Leave the terminal session' }],
+      skills: async () => [{ name: 'commit-helper', description: 'Git commits', modelInvocable: true }],
+      maxVisible: 8,
+      rows: () => 24,
+      syncMaxVisible: () => {},
+    })
+    await expect(provider.getSuggestions(['/'], 0, 1, { signal: controller.signal })).resolves.toBeNull()
   })
 
   it('reads the roster live, so a later registration appears without a restart', async () => {

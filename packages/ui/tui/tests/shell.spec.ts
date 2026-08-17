@@ -5,6 +5,7 @@ import { CommandId, type CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TerminalShell, classifySubmission, commandNameOf, paneTitle } from '../src/shell.ts'
+import type { MenuSkill } from '../src/autocomplete.ts'
 import { createPalette } from '../src/theme.ts'
 import type { ToolPresenter } from '../src/view.ts'
 
@@ -102,12 +103,13 @@ async function when(ready: () => boolean, timeoutMs = 2000): Promise<void> {
 }
 
 /** A shell whose editor carries the input-trigger menus over a mutable roster. */
-function shellWithMenus(over: { rows?: number; children?: { name: string }[] } = {}): {
+function shellWithMenus(over: { rows?: number; children?: { name: string }[]; skills?: MenuSkill[] } = {}): {
   shell: TerminalShell
   tui: ReturnType<typeof fakeTui>
   agent: AgentStub
   roster: { name: string; description: string }[]
   children: { name: string }[]
+  skills: MenuSkill[]
   editor: () => FocusedEditor
 } {
   const roster = [
@@ -115,6 +117,7 @@ function shellWithMenus(over: { rows?: number; children?: { name: string }[] } =
     { name: 'exit', description: 'Leave the terminal session' },
   ]
   const children = over.children ?? []
+  const skills = over.skills ?? []
   const tui = fakeTui(over.rows)
   const agent = fakeAgent()
   const shell = new TerminalShell({
@@ -130,13 +133,14 @@ function shellWithMenus(over: { rows?: number; children?: { name: string }[] } =
     defaultRoute: undefined,
     autocomplete: {
       commands: () => roster,
+      skills: async () => skills,
       subagents: async () => children,
       maxVisible: 8,
     },
   })
   shell.start()
   return {
-    shell, tui, agent, roster, children,
+    shell, tui, agent, roster, children, skills,
     editor: () => tui.focused as unknown as FocusedEditor,
   }
 }
@@ -560,6 +564,77 @@ describe('TerminalShell input-trigger menus', () => {
     await settle()
     expect(execute).toHaveBeenCalledOnce()
     expect(agent.followups).toHaveLength(0)
+  })
+
+  it('offers skills beside commands under a slash prefix, marking user-only ones', async () => {
+    const { editor } = shellWithMenus({ skills: [
+      { name: 'commit-helper', description: 'Git commits', modelInvocable: true },
+      { name: 'sign-off', description: 'Sign the release', modelInvocable: false },
+    ] })
+    editor().handleInput('/')
+    await settle()
+    const drawn = editor().render(80).join('\n')
+    expect(drawn).toContain('compact')
+    expect(drawn).toContain('commit-helper')
+    expect(drawn).toContain('Git commits')
+    expect(drawn).toContain('user-only — Sign the release')
+  })
+
+  it('shows a skill registered after the menus were wired, without a restart', async () => {
+    const { editor, skills } = shellWithMenus()
+    editor().handleInput('/')
+    await settle()
+    editor().handleInput('\x1b')
+    expect(editor().isShowingAutocomplete()).toBe(false)
+    skills.push({ name: 'commit-helper', description: 'Git commits', modelInvocable: true })
+    editor().handleInput('c')
+    await settle()
+    expect(editor().render(80).join('\n')).toContain('Git commits')
+  })
+
+  it('submits a completed skill pick as a prompt, not through the command registry', async () => {
+    const execute = vi.fn(() => Promise.resolve(undefined))
+    const roster = [
+      { name: 'compact', description: 'Summarize the conversation' },
+      { name: 'exit', description: 'Leave the terminal session' },
+    ]
+    const skills = [{ name: 'commit-helper', description: 'Git commits', modelInvocable: true }]
+    const tui = fakeTui()
+    const agent = fakeAgent()
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette: createPalette(false),
+      presenter,
+      commands: {
+        find: (_agent: Agent, name: string) => (name === 'compact' ? { name } : undefined),
+        execute,
+      } as unknown as CommandRuntime,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      defaultRoute: undefined,
+      autocomplete: {
+        commands: () => roster,
+        skills: async () => skills,
+        maxVisible: 8,
+      },
+    })
+    shell.start()
+    const editor = tui.focused as unknown as FocusedEditor
+    editor.handleInput('/')
+    await settle()
+    editor.handleInput('commit')
+    await settle()
+    // Enter confirms the pick — the same stroke completes `/commit-helper `
+    // and submits it; the registry does not resolve the name, so the line
+    // ships to the model as ordinary prompt text.
+    editor.handleInput('\r')
+    await settle()
+    expect(execute).not.toHaveBeenCalled()
+    expect(agent.followups).toHaveLength(1)
+    expect(agent.followups[0]?.content).toEqual([{ type: 'text', text: '/commit-helper' }])
   })
 
   it('esc with a menu open dismisses the menu only, keeping the turn and queued work', async () => {
