@@ -731,7 +731,8 @@
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts",
         "tests/**/*.snapshot.ts",
-        "tests/**/*.harness.ts"
+        "tests/**/*.harness.ts",
+        "tests/fixtures/tui-journey/stage-subagent-child.ts"
       ],
       "project": [
         "src/**/*.ts",

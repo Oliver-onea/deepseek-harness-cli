@@ -1,0 +1,133 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`dsh terminal journey snapshots > /help lists the live command registry as text 1`] = `
+"/compact — Compact older conversation history
+/exit — Leave the terminal session
+/feedback <text> — record feedback about this session
+/goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
+task
+/help — List the commands this terminal resolves
+/model [provider/model] — Show or switch the model this session uses
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > /model opens the picker, esc dismisses, and enter applies 1`] = `
+"Model switched to deepseek-official/deepseek-v4-pro (reasoning high)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > @ menu offers a running child and a pick lands the reference in the composer 1`] = `
+"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ @journey-child x
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > slash menu opens, filters, and dispatches a pick 1`] = `
+"/compact — Compact older conversation history
+/exit — Leave the terminal session
+/feedback <text> — record feedback about this session
+/goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
+task
+/help — List the commands this terminal resolves
+/model [provider/model] — Show or switch the model this session uses
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+`;
