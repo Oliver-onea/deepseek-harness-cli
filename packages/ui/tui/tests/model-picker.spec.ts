@@ -643,7 +643,8 @@ describe('runModelCommand', () => {
   })
 
   it('stringifies a default-save rejection that is not an Error', async () => {
-    const persist = vi.fn().mockImplementation(() => Promise.reject('disk gone' as never))
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the non-Error rejection is the case under test
+    const persist = vi.fn().mockImplementation(() => Promise.reject('disk gone'))
     const ui = await uiFor({ persist })
     await expect(runModelCommand(ui, 'deepseek-reasoner')).resolves.toEqual({
       kind: 'success',
