@@ -107,12 +107,19 @@ export interface TuiHarness {
    * Waits on the observable screen state rather than wall-clock sleeps.
    */
   waitFor(text: string, timeoutMs?: number): Promise<void>
+  /**
+   * Resolve once `predicate(screen)` returns true, or reject at the deadline.
+   * Waits on the observable screen state rather than wall-clock sleeps.
+   */
+  waitUntil(predicate: (screen: string) => boolean, timeoutMs?: number): Promise<void>
   /** Render the current screen as plain text with trailing whitespace stripped. */
   snapshot(): string
   /** Render the current screen with ANSI SGR sequences preserved. */
   ansiSnapshot(): string
   /** Return the process exit code after a graceful `/exit`. */
   exit(): Promise<number>
+  /** Send `ctrl+c` and return the process exit code (exits when no turn runs). */
+  cancel(): Promise<number>
   /** Kill the process and clean up the temporary home directory. */
   dispose(): Promise<number>
   /** The harness home this boot runs on, for reuse across boots. */
@@ -133,8 +140,6 @@ class TerminalScreen {
   private col = 0
   private currentAttrs = ''
   private pendingEsc = ''
-  private utf8Remainder = 0
-  private utf8Bytes: number[] = []
 
   constructor(cols: number, rows: number) {
     this.cols = cols
@@ -144,60 +149,45 @@ class TerminalScreen {
     )
   }
 
-  /** Feed raw PTY output bytes into the emulator. */
+  /** Feed decoded PTY output characters into the emulator. */
   feed(data: string): void {
-    const bytes = Buffer.from(data, 'latin1')
-    for (let i = 0; i < bytes.length; i += 1) {
-      const b = bytes[i]
-      if (b === undefined) continue
-      if (this.utf8Remainder > 0) {
-        this.utf8Bytes.push(b)
-        this.utf8Remainder -= 1
-        if (this.utf8Remainder === 0) {
-          this.put(String.fromCodePoint(...this.utf8Bytes))
-          this.utf8Bytes = []
-        }
-        continue
-      }
+    for (const ch of data) {
+      const code = ch.codePointAt(0)
+      if (code === undefined) continue
       if (this.pendingEsc !== '') {
-        this.pendingEsc += String.fromCharCode(b)
+        this.pendingEsc += ch
         if (this.tryConsumeSequence() || this.pendingEsc.length > 32) {
           // Sequence completed or abandon a runaway partial sequence.
           this.pendingEsc = ''
         }
         continue
       }
-      if (b === 0x1b) {
+      if (code === 0x1b) {
         this.pendingEsc = '\x1b'
         continue
       }
-      if (b === 0x0d) {
+      if (code === 0x0d) {
         this.col = 0
         continue
       }
-      if (b === 0x0a) {
+      if (code === 0x0a) {
         this.row = Math.min(this.rows - 1, this.row + 1)
         this.col = 0
         continue
       }
-      if (b === 0x08) {
+      if (code === 0x08) {
         this.col = Math.max(0, this.col - 1)
         continue
       }
-      if (b === 0x09) {
+      if (code === 0x09) {
         this.col = Math.min(this.cols - 1, this.col + (8 - (this.col % 8)))
         continue
       }
-      if (b < 0x20) {
-        // Ignore other C0 controls.
+      if (code < 0x20 || code === 0x7f) {
+        // Ignore other C0 controls and DEL.
         continue
       }
-      if (b >= 0xc0) {
-        this.utf8Bytes = [b]
-        this.utf8Remainder = (b < 0xe0 ? 1 : b < 0xf0 ? 2 : 3)
-        continue
-      }
-      this.put(String.fromCharCode(b))
+      this.put(ch)
     }
   }
 
@@ -415,6 +405,9 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     waitFor(text: string, timeoutMs?: number): Promise<void> {
       return waitFor(plain => plain.includes(text), timeoutMs ?? turnTimeoutMs)
     },
+    waitUntil(predicate: (screen: string) => boolean, timeoutMs?: number): Promise<void> {
+      return waitFor(predicate, timeoutMs ?? turnTimeoutMs)
+    },
     snapshot(): string {
       return screen.plain()
     },
@@ -423,6 +416,10 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     },
     async exit(): Promise<number> {
       child.write('/exit\r')
+      return await exitCode
+    },
+    async cancel(): Promise<number> {
+      child.write('\x03')
       return await exitCode
     },
     async dispose(): Promise<number> {
