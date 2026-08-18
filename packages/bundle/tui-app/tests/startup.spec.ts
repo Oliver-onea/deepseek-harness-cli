@@ -13,7 +13,7 @@ afterEach(() => {
   internals.stderr = process.stderr
   tuiInternals.stdin = process.stdin
   tuiInternals.stdout = process.stdout
-  tuiInternals.interactive = () => process.stdin.isTTY === true && process.stdout.isTTY === true
+  tuiInternals.interactive = () => process.stdin.isTTY && process.stdout.isTTY
 })
 
 /** The stdin fake a driven picker reads: pushes buffer until a listener subscribes. */
@@ -54,7 +54,7 @@ class FakeStdin implements PickerStdin {
 /** The stdout fake a driven picker draws on. */
 class FakeStdout implements PickerStdout {
   readonly chunks: string[] = []
-  constructor(readonly rows?: number | undefined, readonly columns?: number | undefined) {}
+  constructor(readonly rows?: number, readonly columns?: number) {}
 
   write(chunk: string): boolean {
     this.chunks.push(chunk)
@@ -211,6 +211,10 @@ describe('the bare --resume launch picker', () => {
         header({ id: SessionId('session-child'), origin: 'subagent' }),
       ],
     })
+    // The test invariant host defers plugin startup behind its readiness
+    // chain, so the draw arrives asynchronously: await the list before
+    // reading or keying it.
+    await vi.waitFor(() => { expect(stdout.chunks.length).toBeGreaterThan(0) })
     // The picker drew before any service existed, and enter took the newest
     // top-level session through the same inspection a named resume takes.
     expect(stdout.chunks[0]).toContain('Resume a session')
@@ -289,7 +293,9 @@ describe('the bare --resume launch picker', () => {
       list: async () => [header()],
     } as unknown as SessionPersistence)
     const started = ctx.plugin({ name: 'tui-startup-under-test', inject: ['cmdlineArgs', 'sessionPersistence'], apply })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    // The picker owns raw stdin only while its list is up, so dispose once
+    // raw mode is on, not after a fixed delay.
+    await vi.waitFor(() => { expect(stdin.rawModes).toEqual([true]) })
     await ctx.fiber.dispose()
     await expect(started).rejects.toThrow('no session chosen')
     expect(stdin.rawModes).toEqual([true, false])

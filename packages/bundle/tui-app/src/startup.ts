@@ -13,7 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { parseCmdline } from '@deepseek-ai/dsh-cmdline'
 import { StartupRefusalError } from '@deepseek-ai/dsh-app-boot/errors'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { pickResumeSession, resumeCandidates, type PickerStdin, type PickerStdout } from '@deepseek-ai/dsh-tui'
+import { pickResumeSession, resumeCandidates, type PickerStdin, type PickerStdout, type ResumePickerOutcome } from '@deepseek-ai/dsh-tui'
 import type { SessionHeader } from '@deepseek-ai/dsh-session-persistence'
 
 /** Stable Cordis plugin name. */
@@ -87,7 +87,7 @@ export const internals: {
 } = {
   stdin: process.stdin,
   stdout: process.stdout,
-  interactive: () => process.stdin.isTTY === true && process.stdout.isTTY === true,
+  interactive: () => process.stdin.isTTY && process.stdout.isTTY,
 }
 
 /**
@@ -181,16 +181,26 @@ async function pickResumeTarget(ctx: Context, color: boolean): Promise<string> {
       : 'dsh: only subagent child sessions are persisted, and a child is not a conversation to resume; run dsh without --resume to start a fresh one')
   }
   // A teardown while the picker holds the terminal aborts it, so its raw-mode
-  // stdin cannot outlive the tree or hold the process open.
+  // stdin cannot outlive the tree or hold the process open. The abort rides
+  // `internal/plugin` because Cordis runs effect cleanup only after this
+  // callback settles: an async plugin must observe its own disposal or unload
+  // would wait on the picker forever.
   const abort = new AbortController()
-  ctx.effect(() => () => { abort.abort() }, 'tui-startup.resume-picker')
-  const outcome = await pickResumeSession({
-    candidates,
-    color,
-    stdin: internals.stdin,
-    stdout: internals.stdout,
-    signal: abort.signal,
+  const stopCancellation = ctx.on('internal/plugin', (fiber) => {
+    if (fiber === ctx.fiber && fiber.uid === null) abort.abort()
   })
+  let outcome: ResumePickerOutcome
+  try {
+    outcome = await pickResumeSession({
+      candidates,
+      color,
+      stdin: internals.stdin,
+      stdout: internals.stdout,
+      signal: abort.signal,
+    })
+  } finally {
+    stopCancellation()
+  }
   if (outcome.kind === 'picked') return outcome.candidate.id
   throw new StartupRefusalError(outcome.kind === 'too-small'
     ? 'dsh: the terminal is too small for the resume picker; name the session explicitly with dsh --resume <session>'

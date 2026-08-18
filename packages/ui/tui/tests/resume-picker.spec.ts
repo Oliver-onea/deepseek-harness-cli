@@ -109,7 +109,7 @@ class FakeStdin implements PickerStdin {
 /** The stdout fake: records every chunk the picker drew. */
 class FakeStdout implements PickerStdout {
   readonly chunks: string[] = []
-  constructor(readonly rows?: number | undefined, readonly columns?: number | undefined) {}
+  constructor(readonly rows?: number, readonly columns?: number) {}
 
   write(chunk: string): boolean {
     this.chunks.push(chunk)
@@ -176,7 +176,7 @@ describe('pickResumeSession', () => {
       createdAt: at(2026, 7, 15, 8, 30),
       cwd: undefined,
     })
-    const { outcome, stdin, stdout } = await run({ candidates: [first, second] }, input => input.push(ENTER))
+    const { outcome, stdin, stdout } = await run({ candidates: [first, second] }, (input) => { input.push(ENTER) })
     expect(outcome).toEqual({ kind: 'picked', candidate: first })
     const [drawn] = stdout.chunks
     expect(drawn).toContain('Resume a session\n\n')
@@ -195,7 +195,7 @@ describe('pickResumeSession', () => {
       id: SessionId(`session-${index}`),
       createdAt: at(2026, 7, 16, 12 - index, 3),
     }))
-    const { outcome, stdout } = await run({ candidates }, input => {
+    const { outcome, stdout } = await run({ candidates }, (input) => {
       input.push(DOWN)
       input.push(DOWN)
       input.push(UP)
@@ -216,20 +216,20 @@ describe('pickResumeSession', () => {
       id: SessionId('session-2'),
       createdAt: at(2026, 7, 15, 8, 30),
     })
-    const { outcome } = await run({ candidates: [candidate(), second] }, input => input.push('2'))
+    const { outcome } = await run({ candidates: [candidate(), second] }, (input) => { input.push('2') })
     expect(outcome).toEqual({ kind: 'picked', candidate: second })
   })
 
   it('exits without resuming on esc and on ctrl+c', async () => {
     for (const key of [ESC, CTRL_C]) {
-      const { outcome, stdin } = await run({}, input => input.push(key))
+      const { outcome, stdin } = await run({}, (input) => { input.push(key) })
       expect(outcome).toEqual({ kind: 'dismissed' })
       expect(stdin.rawModes).toEqual([true, false])
     }
   })
 
   it('ignores keys that name no row', async () => {
-    const { outcome, stdout } = await run({}, input => {
+    const { outcome, stdout } = await run({}, (input) => {
       input.push('0')
       input.push('9')
       input.push('x')
@@ -246,7 +246,7 @@ describe('pickResumeSession', () => {
       id: SessionId(`session-${index}`),
       createdAt: at(2026, 7, 16, 12, index),
     }))
-    const { outcome, stdout } = await run({ candidates, rows: 9 }, input => {
+    const { outcome, stdout } = await run({ candidates, rows: 9 }, (input) => {
       input.push(DOWN)
       input.push(DOWN)
       input.push(DOWN)
@@ -261,7 +261,7 @@ describe('pickResumeSession', () => {
   })
 
   it('renders nothing and captures no keys below the row gate', async () => {
-    const { outcome, stdin, stdout } = await run({ rows: 5, columns: 20 }, input => input.push(ENTER))
+    const { outcome, stdin, stdout } = await run({ rows: 5, columns: 20 }, (input) => { input.push(ENTER) })
     expect(outcome).toEqual({ kind: 'too-small' })
     expect(stdout.chunks).toEqual([])
     expect(stdin.rawModes).toEqual([])
@@ -269,8 +269,8 @@ describe('pickResumeSession', () => {
   })
 
   it('renders the same layout without SGR when color is off', async () => {
-    const plain = await run({ color: false }, input => input.push(ENTER))
-    const styled = await run({ color: true }, input => input.push(ENTER))
+    const plain = await run({ color: false }, (input) => { input.push(ENTER) })
+    const styled = await run({ color: true }, (input) => { input.push(ENTER) })
     expect(plain.stdout.chunks[0]).not.toMatch(/\x1b\[\d+m/u)
     expect(styled.stdout.chunks[0]).toMatch(/\x1b\[\d+m/u)
     expect(styled.stdout.chunks[0]!.replaceAll(/\x1b\[\d+m/gu, '')).toBe(plain.stdout.chunks[0])
@@ -280,9 +280,9 @@ describe('pickResumeSession', () => {
 
   it('sanitizes untrusted metadata to visible escapes', async () => {
     const { stdout } = await run({
-      candidates: [candidate({ cwd: `${join(homedir(), 'pro\x1b]0;pwned\x07\tject')}` })],
+      candidates: [candidate({ cwd: join(homedir(), 'pro\x1b]0;pwned\x07\tject') })],
       color: false,
-    }, input => input.push(ENTER))
+    }, (input) => { input.push(ENTER) })
     expect(stdout.chunks[0]).toContain('\\x1b]0;pwned\\x07')
     expect(stdout.chunks[0]).toContain('\\x1b')
     expect(stdout.chunks[0]).not.toContain('\x1b]0;')
@@ -291,20 +291,20 @@ describe('pickResumeSession', () => {
   it('collapses the home prefix and keeps other paths absolute', async () => {
     const inside = candidate({ cwd: join(homedir(), 'codes', 'dsh') })
     const outside = candidate({ cwd: sep === '/' ? '/opt/work' : 'X:\\opt\\work' })
-    const { stdout } = await run({ candidates: [inside, outside] }, input => input.push(ENTER))
-    expect(stdout.chunks[0]).toContain(`~/codes/dsh`)
+    const { stdout } = await run({ candidates: [inside, outside] }, (input) => { input.push(ENTER) })
+    expect(stdout.chunks[0]).toContain('~/codes/dsh')
     expect(stdout.chunks[0]).toContain(sep === '/' ? '/opt/work' : 'X:\\opt\\work')
   })
 
   it('truncates long ids and rows to the terminal width', async () => {
-    const wide = await run({ candidates: [candidate()] }, input => input.push(ENTER))
+    const wide = await run({ candidates: [candidate()] }, (input) => { input.push(ENTER) })
     expect(wide.stdout.chunks[0]).toContain('session-00000000…')
-    const narrow = await run({ candidates: [candidate()], columns: 12 }, input => input.push(ENTER))
+    const narrow = await run({ candidates: [candidate()], columns: 12 }, (input) => { input.push(ENTER) })
     expect(narrow.stdout.chunks[0]!.split('\n')[2]).toBe('> 1. 2026-08')
   })
 
   it('settles dismissed when stdin closes, leaving the closed stream alone', async () => {
-    const { outcome, stdin, stdout } = await run({}, input => input.close())
+    const { outcome, stdin, stdout } = await run({}, (input) => { input.close() })
     expect(outcome).toEqual({ kind: 'dismissed' })
     expect(stdin.rawModes).toEqual([true])
     expect(stdout.chunks).toHaveLength(2)

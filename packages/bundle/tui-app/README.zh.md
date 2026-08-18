@@ -8,7 +8,7 @@ agent 平面保持在 base 放置的位置。这个界面是单会话的，并�
 
 ## 唯一配置的 agent
 
-base 把 `agent-loop` 的 `agents: []` 留给按请求创建会话的界面。本 bundle 恰好配置一个，全新或恢复，由 startup 提供者决定是哪一种：`--resume <session>` 会先通过持久化层检查该会话，再发布 `resumeSessionId`；其他任何启动都在调用目录中铸造一个新的 `sessionId`。缺失或不可读的持久日志会在依赖行激活或屏幕进入备用模式前拒绝启动。agent 行与屏幕行从提供者读取同一个 id，因此二者互不依赖挂载顺序。
+base 把 `agent-loop` 的 `agents: []` 留给按请求创建会话的界面。本 bundle 恰好配置一个，全新或恢复，由 startup 提供者决定是哪一种：`--resume <session>` 会先通过持久化层检查该会话，再发布 `resumeSessionId`；不带会话名的 `--resume` 先经启动选择器解析出 id；其他任何启动都在调用目录中铸造一个新的 `sessionId`。缺失或不可读的持久日志会在依赖行激活或屏幕进入备用模式前拒绝启动。agent 行与屏幕行从提供者读取同一个 id，因此二者互不依赖挂载顺序。
 
 ## 命令行
 
@@ -19,9 +19,12 @@ base 把 `agent-loop` 的 `agents: []` 留给按请求创建会话的界面。�
 | `[task...]` | 首个任务，以空格连接；屏幕打开并从它开始。 |
 | `--` | 结束应用选项解析；后续形似 flag 的 token 会成为任务文本。 |
 | `--resume <session>` | 继续一个已持久化的会话，而不是新建。 |
+| `--resume` | 不带会话名时，在启动时从列表中选择一个；选择器要求 stdin 与 stdout 都是 TTY。 |
 | `--model <model>` | 本会话使用的模型 id。 |
 | `--provider <provider>` | 本会话使用的 provider 路由。 |
 | `--no-color` | 不带 ANSI 样式渲染。 |
+
+不带会话名的 `--resume` 在普通终端上打开启动选择器（[`dsh-tui`](../../ui/tui/README.md) 的 `pickResumeSession`），先于任何屏幕：它按最新在前列出持久层中的顶层会话，`↑`/`↓` 或数字移动，`enter` 恢复光标所在行，`esc`/`ctrl+c` 不启动任何东西直接退出。选中的 id 走与指名恢复完全相同的检查。选择器无法给出目标的一切途径都会在依赖行激活之前拒绝启动，因此既不会恢复错会话，也不会凭空新建会话：任一流不是 TTY、存储无法列出、没有可选项（子 agent 会话是委派草稿，不是对话）、终端放不下一个候选行，或列表被关闭。每条拒绝消息都会指出显式的 `--resume <session>` 形式或新建会话的替代做法。
 
 ## Model Experience
 

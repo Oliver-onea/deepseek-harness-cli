@@ -18,7 +18,7 @@ Give the terminal an in-process session switcher: a roster of live and persisted
 
 **One process per conversation, which is the shipped behavior.** A second terminal tab costs the reader a tab and nothing else. `dsh --resume <session>` already carries continuity across processes: the startup provider resumes a persisted session, and the transcript, the model route recorded in the log, and torn-turn recovery all survive. This is the alternative the rejection rests on.
 
-**A startup-time resume picker.** The one genuine pain in the current arrangement is not switching but *discovering* a session id — a reader must already know the id to pass `--resume`, and the repository's own tests recover ids by reading them off disk. A picker at launch removes that pain at a small fraction of a switcher's cost, and leaves the single-agent composition untouched. This is the recommended follow-up and is not rejected here.
+**A startup-time resume picker.** The one genuine pain in the current arrangement is not switching but *discovering* a session id — a reader must already know the id to pass `--resume`, and the repository's own tests recover ids by reading them off disk. A picker at launch removes that pain at a small fraction of a switcher's cost, and leaves the single-agent composition untouched. This is the recommended follow-up and is not rejected here; it shipped as the [launch-time resume picker](../../implemented/feature/2026-08-18-tui-launch-resume-picker.md).
 
 ## Why this is rejected
 
@@ -39,7 +39,7 @@ The terminal stays one conversation per process, and the Known Limitation stays 
 Two cheaper items outrank a switcher for the next parity work, both recorded in that same README:
 
 - **Effort selection.** `/model` applies the picked model's default reasoning effort and offers no effort menu, while the web composer offers Model and Effort as two levels. The panel, the model-selection ref, and the `reasoningEffort` field are all already in place, so this closes a parity gap with a small change.
-- **A startup resume picker**, as described above.
+- **A startup resume picker**, as described above — now [implemented](../../implemented/feature/2026-08-18-tui-launch-resume-picker.md).
 
 ## Reintroduction condition
 
