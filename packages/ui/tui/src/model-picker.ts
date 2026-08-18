@@ -75,7 +75,7 @@ export async function modelCandidates(llm: LlmRuntime): Promise<ModelCatalog> {
         })
       }
     } catch (error: unknown) {
-      failures.push(displayLine(`${provider.id}: ${error instanceof Error ? error.message : String(error)}`))
+      failures.push(displayLine(`${provider.id}: ${errorText(error)}`))
     }
   }
   return { candidates, failures }
@@ -119,6 +119,15 @@ export type EffortRequest =
 
 /** The argument that asks a route for its adapter's default effort. */
 const DEFAULT_EFFORT_ARGUMENT = 'default'
+
+/**
+ * Render a rejection's message without trusting its coercion.
+ * @param error - a rejection the adapter registry or persistence produced.
+ * @returns the message to show the reader.
+ */
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 /**
  * Resolve one `/model` effort argument against the route's adapter-declared
@@ -308,15 +317,11 @@ export interface ModelPick {
 /**
  * Settle the effort tier on one row.
  * @param tier - the drilled route and its rows.
- * @param index - the row the reader applied.
+ * @param index - the row the reader applied, always inside `rows`.
  * @returns the pick that row settles to.
  */
 function settleTierRow(tier: { candidate: ModelCandidate; rows: readonly EffortRow[] }, index: number): ModelPick {
-  const row = tier.rows[index]
-  return {
-    candidate: tier.candidate,
-    ...row === undefined ? {} : { effort: row.request },
-  }
+  return { candidate: tier.candidate, effort: (tier.rows[index] as EffortRow).request }
 }
 
 /** Everything the picker panel draws. */
@@ -436,7 +441,7 @@ export class ModelPickerPanel implements Component {
     }
     const hidden = tier.rows.length - shown.length
     if (hidden > 0) lines.push(palette.dim(`… ${hidden} more`))
-    lines.push(palette.dim(this.tierControls(tier)))
+    lines.push(palette.dim(this.tierControls()))
     return lines
   }
 
@@ -454,15 +459,12 @@ export class ModelPickerPanel implements Component {
   }
 
   /**
-   * Name the tier's controls.
-   * @param tier - the drilled route, its rows, and its cursor.
+   * Name the tier's controls. The tier always offers the default beside at
+   * least one declared effort, so movement always applies.
    * @returns the tier state's controls hint.
    */
-  private tierControls(tier: { rows: readonly EffortRow[] }): string {
-    const hints: string[] = []
-    if (tier.rows.length > 1) hints.push('↑↓ move')
-    hints.push('enter apply', 'esc back')
-    return hints.join('  ')
+  private tierControls(): string {
+    return ['↑↓ move', 'enter apply', 'esc back'].join('  ')
   }
 
   /**
@@ -633,7 +635,7 @@ async function installPick(
   try {
     await ui.persist?.(applied)
   } catch (error: unknown) {
-    saveWarning = `not saved as the default: ${error instanceof Error ? error.message : String(error)}`
+    saveWarning = `not saved as the default: ${errorText(error)}`
   }
   return { applied, inForce: applied.reasoningEffort ?? candidate.reasoning?.defaultEffort, previous, saveWarning }
 }
@@ -680,7 +682,7 @@ export async function runModelCommand(ui: ModelSelectionUi, rawInput: string): P
     try {
       effort = effortRequestFor(candidate, tokens[MAX_ARGUMENTS - 1] as string)
     } catch (error: unknown) {
-      return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+      return { kind: 'error', text: errorText(error) }
     }
   }
   let pick: AppliedPick
@@ -689,7 +691,7 @@ export async function runModelCommand(ui: ModelSelectionUi, rawInput: string): P
   } catch (error: unknown) {
     return {
       kind: 'error',
-      text: `cannot switch to ${displayLine(tokens[0] as string)}: ${error instanceof Error ? error.message : String(error)}`,
+      text: `cannot switch to ${displayLine(tokens[0] as string)}: ${errorText(error)}`,
     }
   }
   return { kind: 'success', text: switchText(pick) }
@@ -730,7 +732,7 @@ function pickerResult(ui: ModelSelectionUi, llm: LlmRuntime, catalog: ModelCatal
           (error: unknown) => {
             resolve({
               kind: 'error',
-              text: `cannot switch to ${displayLine(`${pick.candidate.provider}/${pick.candidate.model}`)}: ${error instanceof Error ? error.message : String(error)}`,
+              text: `cannot switch to ${displayLine(`${pick.candidate.provider}/${pick.candidate.model}`)}: ${errorText(error)}`,
             })
           },
         )

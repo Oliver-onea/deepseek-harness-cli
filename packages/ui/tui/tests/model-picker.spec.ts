@@ -23,6 +23,7 @@ import {
   applyModelSelection,
   effortRequestFor,
   findCandidate,
+  markedEffort,
   modelCandidates,
   ModelPickerPanel,
   runModelCommand,
@@ -72,6 +73,22 @@ class ScriptedAdapter extends LlmAdapter {
 
   override async *stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
     // Picker tests never enter provider streaming.
+  }
+}
+
+/**
+ * An adapter whose exact-route resolution succeeds once — for the catalog
+ * read — and then rejects with a non-Error value, so a pick that validated
+ * its route through the catalog still meets a rejection at apply time.
+ */
+class SecondCallRejectingAdapter extends ScriptedAdapter {
+  private calls = 0
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    this.calls += 1
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the non-Error rejection is the case under test
+    if (this.calls > 1) return Promise.reject('route gone')
+    return super.resolveModel(provider, model)
   }
 }
 
@@ -278,6 +295,19 @@ describe('effortRequestFor', () => {
 
   it('refuses any effort argument for a route that offers none', () => {
     expect(() => effortRequestFor(OTHER, 'high')).toThrow('other/other-model offers no reasoning efforts')
+  })
+})
+
+describe('markedEffort', () => {
+  it('marks the in-force effort of the current route, else the declared default', () => {
+    expect(markedEffort(CHAT, { provider: CHAT.provider, model: CHAT.model, reasoningEffort: ReasoningEffortId('off') }))
+      .toBe('off')
+    expect(markedEffort(CHAT, { provider: 'other', model: 'else' })).toBe('high')
+    expect(markedEffort(CHAT, undefined)).toBe('high')
+  })
+
+  it('marks nothing for a route that offers no efforts', () => {
+    expect(markedEffort(OTHER, { provider: 'other', model: 'other-model' })).toBeUndefined()
   })
 })
 
@@ -700,6 +730,32 @@ describe('ModelPickerPanel', () => {
     expect(drawn).toContain('… 1 more')
   })
 
+  it('leaves tier rows past the number-key reach unnumbered', () => {
+    const many: CandidateReasoning = {
+      efforts: Array.from({ length: 12 }, (_unused, index) => ({
+        id: ReasoningEffortId(`e-${String(index)}`),
+        name: `E ${String(index)}`,
+      })),
+      defaultEffort: ReasoningEffortId('e-0'),
+    }
+    const { panel } = picker([{ ...CHAT, reasoning: many }], { visible: 14 })
+    panel.handleInput(RIGHT)
+    const drawn = panel.render(80).join('\n')
+    expect(drawn).toContain('9.   e-7')
+    expect(drawn).not.toContain('10.')
+    expect(drawn).toContain('e-11')
+  })
+
+  it('ignores keys that select nothing in the tier', () => {
+    const { panel, settled, changes } = picker(CANDIDATES)
+    panel.handleInput(RIGHT)
+    panel.handleInput('0')
+    panel.handleInput('9')
+    panel.handleInput('x')
+    expect(settled).toEqual([])
+    expect(changes()).toBe(1)
+  })
+
   it('draws the same list and tier layout with and without color', () => {
     const draw = (color: boolean): string => {
       const panel = new ModelPickerPanel(
@@ -800,6 +856,37 @@ describe('runModelCommand', () => {
     })
     expect(ui.selection.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
     expect(ui.onApplied).not.toHaveBeenCalled()
+  })
+
+  it('reports a rejection that surfaces only at apply time, without trusting a non-Error coercion', async () => {
+    const llm = await llmWith({
+      'deepseek-official': new SecondCallRejectingAdapter([
+        { provider: 'deepseek-official', id: 'deepseek-chat', name: 'DeepSeek Chat' },
+      ]),
+    })
+    const ui = await uiFor({ llm })
+    await expect(runModelCommand(ui, 'deepseek-chat')).resolves.toEqual({
+      kind: 'error',
+      text: 'cannot switch to deepseek-chat: route gone',
+    })
+    expect(ui.selection.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+  })
+
+  it('reports a picker pick that rejects only at apply time, without trusting a non-Error coercion', async () => {
+    const llm = await llmWith({
+      'deepseek-official': new SecondCallRejectingAdapter([
+        { provider: 'deepseek-official', id: 'deepseek-chat', name: 'DeepSeek Chat' },
+      ]),
+    })
+    const host = fakeHost()
+    const ui = await uiFor({ host, llm })
+    const pending = runModelCommand(ui, '')
+    await settle()
+    ;(host.panels[0] as ModelPickerPanel).handleInput(ENTER)
+    await expect(pending).resolves.toEqual({
+      kind: 'error',
+      text: 'cannot switch to deepseek-official/deepseek-chat: route gone',
+    })
   })
 
   it('renders a non-Error exact-route rejection as a catalog failure without trusting its coercion', async () => {
