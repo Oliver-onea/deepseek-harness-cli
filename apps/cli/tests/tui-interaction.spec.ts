@@ -242,4 +242,67 @@ describe('dsh terminal journey snapshots', () => {
       await harness.dispose()
     }
   }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 5)
+
+  it('/model drills into a route effort tier and applies the picked effort', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+
+      harness.submit('/model')
+      await harness.waitFor('Model', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitFor('deepseek-official/deepseek-v4-pro', DEFAULT_TURN_TIMEOUT_MS)
+      harness.key('down')
+      harness.key('right')
+      await harness.waitFor('Effort', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitFor('off — Off', DEFAULT_TURN_TIMEOUT_MS)
+      harness.type('2')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 5)
+
+  it('/model <route> <effort> selects directly and reports the pinned effort', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+      harness.submit('/model deepseek-v4-pro off')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 3)
+
+  it('/model <route> <effort> rejects an unknown effort at pick time naming what is available', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+      harness.submit('/model deepseek-v4-pro turbo')
+      await harness.waitFor('unknown effort "turbo" for deepseek-official/deepseek-v4-pro', DEFAULT_TURN_TIMEOUT_MS)
+      await harness.waitFor('available: default, off, high, max', DEFAULT_TURN_TIMEOUT_MS)
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 3)
+
+  it('/model reports was <effort> when a pick replaces a stored explicit effort', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+      harness.submit('/model deepseek-v4-pro off')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
+      harness.submit('/model deepseek-v4-flash')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-flash (reasoning high, was off)', DEFAULT_TURN_TIMEOUT_MS)
+      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 5)
 })

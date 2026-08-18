@@ -21,6 +21,11 @@ Add keyless, deterministic journey snapshots under `apps/cli/tests/tui-interacti
 5. **`@` empty roster** — without the child-staging patch, type `@` and snapshot that the menu never opens and the `@` stays in the composer.
 6. **Model picker (`/model`)** — open the picker, dismiss with `esc`, reopen, move down to `deepseek-official/deepseek-v4-pro`, apply with `enter`, and snapshot the confirmation.
 
+7. **Effort tier (`/model`)** — drill from a route row into its adapter-declared effort tier and apply, snapshotting the confirmation.
+8. **Direct effort argument** — `/model <route> <effort>` selects without opening the panel and reports the pinned effort.
+9. **Unsupported effort refused** — `/model <route> <unknown-effort>` fails at pick time naming what the route advertises, leaving the previous selection intact.
+10. **Replacement notice** — a model pick that drops a stored explicit effort reports `was <effort>`, pinning the decision that shipped in place of carry-forward.
+
 ### Staging a running child for the `@` case
 
 The `@` menu needs a running subagent child to offer. A real model turn would make the test non-deterministic and would require a key, so a fixture plugin (`apps/cli/tests/fixtures/tui-journey/stage-subagent-child.ts`) is injected via `--patch`:

@@ -21,6 +21,11 @@ Status: proposed
 5. **`@` 空列表** —— 不带子会话上台 patch 插件，输入 `@`，并对菜单未打开、仅保留 `@` 在输入区的状态做快照。
 6. **模型选择器（`/model`）** —— 打开选择器，按 `esc` 取消，再次打开，下移到 `deepseek-official/deepseek-v4-pro`，按 `enter` 应用，并对确认信息做快照。
 
+7. **Effort 层级（`/model`）** — 从路线行下钻到其适配器声明的 effort 层级并应用，快照确认信息。
+8. **直接 effort 参数** — `/model <route> <effort>` 不开面板直接选定，并报告钉住的 effort。
+9. **拒绝不支持的 effort** — `/model <route> <unknown-effort>` 在选取时失败并列出该路线所声明的项，先前的选择保持不变。
+10. **替换通知** — 丢弃已存明确 effort 的模型选取会报告 `was <effort>`，钉住最终采用（而非 carry-forward）的决定。
+
 ### 为 `@` 用例上台运行中的子会话
 
 `@` 菜单需要有一个运行中的子代理子会话可供列出。真实的模型轮次会让测试变得非确定性并需要密钥，因此通过一个 fixture 插件（`apps/cli/tests/fixtures/tui-journey/stage-subagent-child.ts`）经 `--patch` 注入：

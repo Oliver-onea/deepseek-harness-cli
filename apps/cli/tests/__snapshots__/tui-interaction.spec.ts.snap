@@ -66,6 +66,105 @@ task
  ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
 `;
 
+exports[`dsh terminal journey snapshots > /model <route> <effort> rejects an unknown effort at pick time naming what is available 1`] = `
+"unknown effort "turbo" for deepseek-official/deepseek-v4-pro; available: default, off, high, max
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > /model <route> <effort> selects directly and reports the pinned effort 1`] = `
+"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > /model drills into a route effort tier and applies the picked effort 1`] = `
+"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+`;
+
 exports[`dsh terminal journey snapshots > /model opens the picker, esc dismisses, and enter applies 1`] = `
 "Model switched to deepseek-official/deepseek-v4-pro (reasoning high)
 
@@ -97,6 +196,39 @@ exports[`dsh terminal journey snapshots > /model opens the picker, esc dismisses
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
  ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+`;
+
+exports[`dsh terminal journey snapshots > /model reports was <effort> when a pick replaces a stored explicit effort 1`] = `
+"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+
+Model switched to deepseek-official/deepseek-v4-flash (reasoning high, was off)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
 `;
 
 exports[`dsh terminal journey snapshots > @ menu offers a running child and a pick lands the reference in the composer 1`] = `
