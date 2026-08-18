@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-18-sdk-session-interrupt.md
+2026-08-18-sdk-session-interrupt.md: 32253add926e7ca6304190df53f560619e22f484
+2026-08-18-sdk-session-interrupt.zh.md: 89a7f8f988de9bdf7e527cf67f6d399101862c7d

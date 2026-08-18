@@ -33,6 +33,13 @@
  *   arrives, then poll for the GO file before answering (deterministic
  *   cancel-during-handshake window).
  * - `FAKE_HANG_PROMPT`: never answer `session/prompt` (for timeout/dispose tests).
+ * - `FAKE_HANG_TURN`: answer `session/prompt` normally, stream one partial chunk,
+ *   then hold the turn open until `session/interrupt` aborts it (mid-turn
+ *   interrupt probe); the interrupt emits the aborted turn/end and idle status.
+ * - `FAKE_RECORD_INTERRUPT`: append each `session/interrupt` params JSON to this
+ *   file (interrupt wire probe).
+ * - `FAKE_MALFORMED_INTERRUPT`: `session/interrupt` answers a non-object result
+ *   (wire-validation probe).
  * - `FAKE_STREAM_THEN_MALFORMED`: stream a text chunk for the prompt, then
  *   answer `{}` (no accepted) — same-pipe ordering makes the chunk arrive
  *   before the protocol failure (partial-output retention probe).
@@ -153,6 +160,11 @@ function sessionIdOf(params: Record<string, unknown> | undefined): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** Sessions the fake runtime has accepted a prompt for. */
+const knownSessions = new Set<string>()
+/** Sessions whose accepted turn hangs until `session/interrupt` arrives. */
+const hungSessions = new Set<string>()
+
 const reader = createInterface({ input: process.stdin })
 reader.on('line', (line) => {
   if (line.trim().length === 0) return
@@ -195,6 +207,7 @@ reader.on('line', (line) => {
       return
     case 'session/prompt': {
       const sessionId = sessionIdOf(frame.params)
+      knownSessions.add(sessionId)
       const messageId = `fake-user-${seq}`
       event(sessionId, 'agent/inbox/spliced', {
         target: 'next-turn',
@@ -217,9 +230,33 @@ reader.on('line', (line) => {
         respond({})
         return
       }
+      if (env.FAKE_HANG_TURN !== undefined) {
+        event(sessionId, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'partial' } })
+        hungSessions.add(sessionId)
+        respond({ messageId })
+        return
+      }
       runTurn(sessionId)
       notify('session.status', { sessionId, status: 'idle' })
       respond({ messageId })
+      return
+    }
+    case 'session/interrupt': {
+      const sessionId = sessionIdOf(frame.params)
+      if (env.FAKE_RECORD_INTERRUPT !== undefined) appendFileSync(env.FAKE_RECORD_INTERRUPT, `${JSON.stringify(frame.params)}\n`)
+      if (env.FAKE_MALFORMED_INTERRUPT !== undefined) {
+        write({ jsonrpc: '2.0', id: frame.id, result: 'not-an-object' })
+        return
+      }
+      if (!knownSessions.has(sessionId)) {
+        write({ jsonrpc: '2.0', id: frame.id, error: { code: -32603, message: `unknown SDK session for session/interrupt: ${sessionId}` } })
+        return
+      }
+      if (hungSessions.delete(sessionId)) {
+        event(sessionId, 'turn/end', { turn: 0, reason: { kind: 'aborted', reason: { kind: 'user' } } })
+        notify('session.status', { sessionId, status: 'idle' })
+      }
+      respond({})
       return
     }
     case 'shutdown':

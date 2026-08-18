@@ -1,12 +1,12 @@
 /**
  * Keyless snapshot coverage for the TypeScript SDK path: each scenario spawns
  * the REAL `dsh-jsonrpc-agent` runtime (per `DSH_EXAMPLE_MODE`) through the
- * REAL `@deepseek-ai/dsh-sdk-client`, drives one turn over stdio JSON-RPC,
- * and pins the SDK `RunResult`, the complete notification stream, and the
- * persisted session logs. Replay serves recorded model
- * responses via `llm-replay` (`cordis.snapshot.yml`); `DSH_SNAPSHOT=record`
- * re-records against the live API; `DSH_SNAPSHOT=refresh` replays committed
- * fixtures and rewrites expected outputs.
+ * REAL `@deepseek-ai/dsh-sdk-client`, drives one turn — or a prompt → queue →
+ * interrupt flow — over stdio JSON-RPC, and pins the SDK-visible result, the
+ * complete notification stream, and the persisted session logs. Replay serves
+ * recorded model responses via `llm-replay` (`cordis.snapshot.yml`);
+ * `DSH_SNAPSHOT=record` re-records against the live API; `DSH_SNAPSHOT=refresh`
+ * replays committed fixtures and rewrites expected outputs.
  */
 
 import { existsSync } from 'node:fs'
@@ -27,7 +27,7 @@ import {
   type NormalizeContext,
 } from '@deepseek-ai/dsh-acp-snapshot'
 import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
-import { DeepSeekHarness, type HarnessNotification, type RunResult } from '@deepseek-ai/dsh-sdk-client'
+import { DeepSeekHarness, type ContentBlock, type HarnessNotification, type RunResult } from '@deepseek-ai/dsh-sdk-client'
 
 const testsDir = dirOf(import.meta.url)
 const snapshotsDir = join(testsDir, 'snapshots')
@@ -59,12 +59,20 @@ function dirOf(url: string): string {
 interface SdkScenario {
   /** Scenario name; the snapshots/<name> fixture directory. */
   name: string
-  /** The user prompt for the single SDK turn. */
+  /** The user prompt for the first (or only) SDK turn. */
   prompt: string
   /** Fixed SDK session id, so fixtures and replay binding stay stable. */
   sessionId: string
   /** How many child sessions the turn persists (subagent scenarios). */
   children: number
+  /**
+   * Authored prompt → queue → interrupt flow driven over `HarnessClient`
+   * instead of `harness.run`: the first prompt hangs mid-stream (replay
+   * `hang` entry), `queuedPrompt` is then discarded (default) or parked
+   * (`keepInbox`) until `wakePrompt` claims it. Replay/refresh only — a live
+   * hang is not recordable.
+   */
+  interrupt?: { queuedPrompt: string; keepInbox?: boolean; wakePrompt?: string }
   /** Optional scenario-specific live and replay compositions. */
   configs?: { live: string; replay: string }
   /** Environment overrides passed to the runtime subprocess. */
@@ -112,6 +120,29 @@ const SCENARIOS: SdkScenario[] = [
     expectedSystem: MINIMAL_SYSTEM_PROMPT,
     expectedToolDescriptions: { bash: MINIMAL_BASH_DESCRIPTION },
     runtimeContext: false,
+  },
+  {
+    // Keyless authored scenario (like the ACP `cancel`): the replay `hang`
+    // entry stalls mid-stream so the interrupt lands deterministically; the
+    // default clears the queued prompt.
+    name: 'interrupt',
+    prompt: 'Write a long essay; the client interrupts it mid-stream.',
+    sessionId: 'sdk-snapshot-interrupt',
+    children: 0,
+    interrupt: { queuedPrompt: 'Queued behind the hang; the default interrupt discards this.' },
+  },
+  {
+    // Same hang, but `keepInbox` parks the queued prompt instead of
+    // discarding it; the wake prompt claims the parked work afterwards.
+    name: 'interrupt-keep-inbox',
+    prompt: 'Write a long essay; the client interrupts it mid-stream.',
+    sessionId: 'sdk-snapshot-interrupt-keep',
+    children: 0,
+    interrupt: {
+      queuedPrompt: 'Queued behind the hang; keepInbox parks it for the wake prompt.',
+      keepInbox: true,
+      wakePrompt: 'Wake the parked queue.',
+    },
   },
 ]
 
@@ -207,14 +238,24 @@ function contextOfContents(contents: readonly string[]): NormalizeContext {
   }
 }
 
-async function hydrateReplayFixtures(scenario: SdkScenario, cwd: string): Promise<string[]> {
+/** Hydrated replay inputs: the session fixtures plus the optional `hang`/`throw` sidecar. */
+interface HydratedFixtures {
+  readonly files: string[]
+  readonly override?: string
+}
+
+async function hydrateReplayFixtures(scenario: SdkScenario, cwd: string): Promise<HydratedFixtures> {
   const root = join(cwd, '.replay-fixtures')
   await mkdir(root, { recursive: true })
-  return Promise.all(fixtureFiles(scenario).map(async (source) => {
+  const hydrate = async (source: string): Promise<string> => {
     const destination = join(root, basename(source))
     await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
     return destination
-  }))
+  }
+  const files = await Promise.all(fixtureFiles(scenario).map(hydrate))
+  const overrideSource = join(snapshotsDir, scenario.name, 'replay.override.json')
+  const override = existsSync(overrideSource) ? await hydrate(overrideSource) : undefined
+  return { files, ...override === undefined ? {} : { override } }
 }
 
 async function readExpectedFile(path: string): Promise<string | MissingFile> {
@@ -258,7 +299,116 @@ function normalizeResult(result: RunResult, ctx: NormalizeContext): string {
   })}\n`, ctx)
 }
 
-/** One SDK turn against a fresh runtime subprocess in an isolated cwd. */
+/** One owned `harness.run` turn with its notification stream. */
+async function runPromptDrive(
+  harness: DeepSeekHarness,
+  scenario: SdkScenario,
+  cwd: string,
+): Promise<{ result: RunResult; notifications: HarnessNotification[] }> {
+  const notifications: HarnessNotification[] = []
+  const result = await harness.run(scenario.prompt.replaceAll('{{cwd}}', cwd), {
+    sessionId: scenario.sessionId,
+    onNotification: (notification) => { notifications.push(notification) },
+  })
+  return { result, notifications }
+}
+
+/** Marker the replay `hang` entry touches in the runtime's cwd once its prefix chunks streamed. */
+const STREAM_READY_FILE = '.dsh-snapshot-stream-ready'
+
+/** Poll for a path the runtime subprocess creates (30s deadline). */
+async function waitForPath(path: string): Promise<void> {
+  const deadline = Date.now() + 30_000
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+}
+
+/** The `kind` of every `turn/end` reason in a notification stream, in wire order. */
+function turnEndKinds(notifications: readonly HarnessNotification[]): string[] {
+  return notifications.flatMap((notification) => {
+    if (notification.method !== 'session.event') return []
+    const event = notification.params.event as { type?: string; data?: { reason?: { kind?: string } } }
+    const kind = event.data?.reason?.kind
+    return event.type === 'turn/end' && typeof kind === 'string' ? [kind] : []
+  })
+}
+
+/** Concatenated text of the last assistant message (the client's `finalResponse` helper is not a package-root export). */
+function lastAssistantText(events: RunResult['events']): string {
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]
+    if (event?.type !== 'assistant/message') continue
+    return event.data.message.content
+      .filter((block): block is ContentBlock & { type: 'text' } => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+  }
+  return ''
+}
+
+/**
+ * Drive the prompt → queue → interrupt flow over the low-level client: the
+ * first prompt hangs mid-stream, the queued prompt is discarded (default) or
+ * parked (`keepInbox`), and `wakePrompt` claims the parked work afterwards.
+ * The drive settles on the trailing idle status so the pinned stream covers
+ * the whole flow.
+ */
+async function runInterruptDrive(
+  harness: DeepSeekHarness,
+  scenario: SdkScenario,
+  interrupt: NonNullable<SdkScenario['interrupt']>,
+  cwd: string,
+): Promise<{ result: RunResult; notifications: HarnessNotification[] }> {
+  await harness.start()
+  const client = harness.client
+  const notifications: HarnessNotification[] = []
+  const events: RunResult['events'] = []
+  const prompt = (text: string): Promise<string> =>
+    client.prompt(scenario.sessionId, [{ type: 'text', text }])
+  const subscription = client.subscribeSessionTree(scenario.sessionId)
+  /** Collect until the session reports idle, gated on `ready` over the stream so far. */
+  const drainUntilIdle = async (ready: (collected: readonly HarnessNotification[]) => boolean): Promise<void> => {
+    while (true) {
+      const notification = await subscription.next()
+      notifications.push(notification)
+      if (notification.method === 'session.event') {
+        // The expected files pin the exact frames; the drive itself needs no
+        // per-variant narrowing of the event envelope.
+        events.push(notification.params.event as RunResult['events'][number])
+      }
+      if (notification.method === 'session.status'
+        && notification.params.sessionId === scenario.sessionId
+        && notification.params.status === 'idle'
+        && ready(notifications)) return
+    }
+  }
+  try {
+    await prompt(scenario.prompt)
+    await prompt(interrupt.queuedPrompt)
+    // The hang entry touches the marker only after yielding its prefix
+    // chunks, so the interrupt lands deterministically mid-stream.
+    await waitForPath(join(cwd, STREAM_READY_FILE))
+    await client.interrupt(
+      scenario.sessionId,
+      interrupt.keepInbox === undefined ? undefined : { keepInbox: interrupt.keepInbox },
+    )
+    await drainUntilIdle(collected => turnEndKinds(collected).includes('aborted'))
+    if (interrupt.wakePrompt !== undefined) {
+      await prompt(interrupt.wakePrompt)
+      await drainUntilIdle(collected => turnEndKinds(collected).includes('completed'))
+    }
+  } finally {
+    subscription.close()
+  }
+  return {
+    result: { sessionId: scenario.sessionId, finalResponse: lastAssistantText(events), events, notifications },
+    notifications,
+  }
+}
+
+/** One SDK scenario against a fresh runtime subprocess in an isolated cwd. */
 async function runScenario(scenario: SdkScenario): Promise<{
   result: RunResult
   notifications: HarnessNotification[]
@@ -268,13 +418,13 @@ async function runScenario(scenario: SdkScenario): Promise<{
 }> {
   const cwd = await mkdtemp(join(tmpdir(), `sdk-snapshot-${scenario.name}-`))
   const sessionsRoot = join(cwd, '.sessions')
-  const replayFixtures = recording ? [] : await hydrateReplayFixtures(scenario, cwd)
+  const hydrated: HydratedFixtures = recording ? { files: [] } : await hydrateReplayFixtures(scenario, cwd)
   const launch = resolveExampleLaunch({
     srcBin: runtimeBin,
     configArgs: [],
     tsconfigPath: repoTsconfig,
   })
-  const [parentFixture, ...childFixtures] = replayFixtures
+  const [parentFixture, ...childFixtures] = hydrated.files
   const env: Record<string, string> = {
     ...Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>,
     ...Object.fromEntries(Object.entries(launch.env).filter(([, value]) => value !== undefined)) as Record<string, string>,
@@ -288,6 +438,7 @@ async function runScenario(scenario: SdkScenario): Promise<{
     ...parentFixture === undefined ? {} : {
       DSH_SNAPSHOT_FILE: parentFixture,
       ...childFixtures.length > 0 ? { DSH_SNAPSHOT_CHILD_FILES: childFixtures.join(delimiter) } : {},
+      ...hydrated.override === undefined ? {} : { DSH_SNAPSHOT_OVERRIDE: hydrated.override },
     },
     ...scenario.environment,
   }
@@ -305,11 +456,9 @@ async function runScenario(scenario: SdkScenario): Promise<{
     model: 'deepseek-v4-flash',
   })
   try {
-    const notifications: HarnessNotification[] = []
-    const result = await harness.run(scenario.prompt.replaceAll('{{cwd}}', cwd), {
-      sessionId: scenario.sessionId,
-      onNotification: (notification) => { notifications.push(notification) },
-    })
+    const { result, notifications } = scenario.interrupt === undefined
+      ? await runPromptDrive(harness, scenario, cwd)
+      : await runInterruptDrive(harness, scenario, scenario.interrupt, cwd)
     await harness.close()
     const logs = await persistedLogs(sessionsRoot)
     const observedFiles = Object.fromEntries(await Promise.all(
@@ -346,6 +495,9 @@ function fixtureFiles(scenario: SdkScenario): string[] {
 describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
   for (const scenario of SCENARIOS) {
     it(`replays ${scenario.name} through the SDK`, async () => {
+      if (recording && scenario.interrupt !== undefined) {
+        throw new Error(`${scenario.name} is authored against the replay hang entry; a live hang is not recordable`)
+      }
       const scenarioDir = join(snapshotsDir, scenario.name)
       const notificationsExpectedPath = join(scenarioDir, 'notifications.expected.jsonl')
       const resultExpectedPath = join(scenarioDir, 'result.expected.json')

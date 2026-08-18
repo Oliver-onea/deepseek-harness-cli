@@ -19,6 +19,8 @@ import type {
   InitializeResult,
   JsonRpcTransportPeer,
   SessionEventNotification,
+  SessionInterruptParams,
+  SessionInterruptResult,
   SessionPromptParams,
   SessionPromptResult,
   SubagentFinishedNotification,
@@ -143,6 +145,34 @@ export class HarnessSdkJsonRpcServer {
   }
 
   /**
+   * Abort one known SDK session's active turn through its live agent. Queued
+   * and steering work is cleared unless `keepInbox` preserves it (preserved
+   * work stays parked until a later waking prompt claims it); with no active
+   * activity the cancel is a no-op and does not arm later work.
+   * @param params - target session and queued-work policy.
+   * @returns an empty acceptance receipt; the abort is observed through
+   * `session.event` and `session.status`.
+   */
+  interrupt(params: SessionInterruptParams): SessionInterruptResult {
+    // Wire boundary: params arrive as unchecked JSON and are validated before
+    // any session state is touched.
+    if (typeof params.sessionId !== 'string') {
+      throw new TypeError('session/interrupt sessionId must be a string')
+    }
+    if (params.keepInbox !== undefined && typeof params.keepInbox !== 'boolean') {
+      throw new TypeError('session/interrupt keepInbox must be a boolean when given')
+    }
+    const rec = this.sessions.get(params.sessionId)
+    // Unlike prompt, interrupt never creates the session: stopping a mistyped
+    // id must fail loud, not mint an idle agent.
+    if (rec === undefined) {
+      throw new Error(`unknown SDK session for session/interrupt: ${params.sessionId}`)
+    }
+    rec.handle.agent.cancel({ kind: 'user' }, { keepInbox: params.keepInbox })
+    return {}
+  }
+
+  /**
    * Dispose server-owned agents, adapter, and subscriptions to quiescence.
    * The surrounding context remains running.
    * @returns empty JSON-RPC result.
@@ -193,6 +223,8 @@ export class HarnessSdkJsonRpcServer {
         return this.initialize(params as unknown as InitializeParams)
       case 'session/prompt':
         return this.prompt(params as unknown as SessionPromptParams)
+      case 'session/interrupt':
+        return this.interrupt(params as unknown as SessionInterruptParams)
       case 'shutdown':
         return this.shutdown()
       default:
