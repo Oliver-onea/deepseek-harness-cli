@@ -782,8 +782,7 @@
     },
     "packages/bundle/tui-app": {
       "ignoreDependencies": [
-        "@deepseek-ai/dsh-code-runtime-worker-thread",
-        "@deepseek-ai/dsh-tui"
+        "@deepseek-ai/dsh-code-runtime-worker-thread"
       ]
     },
     "packages/ui/tui": {

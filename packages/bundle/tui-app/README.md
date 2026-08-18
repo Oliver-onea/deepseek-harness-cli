@@ -8,7 +8,7 @@ The agent plane stays where the base put it. This surface is single-session and 
 
 ## The one configured agent
 
-The base leaves `agent-loop`'s `agents: []` for surfaces that create sessions on request. This bundle configures exactly one, fresh or resumed, and the startup provider owns which: `--resume <session>` inspects that session through persistence before publishing `resumeSessionId`, while any other launch mints a fresh `sessionId` in the invoking directory. A missing or unreadable stored log refuses startup before dependent rows activate or the screen enters alternate mode. Both the agent row and the screen row read the same id from the provider, so neither depends on the other's mount order.
+The base leaves `agent-loop`'s `agents: []` for surfaces that create sessions on request. This bundle configures exactly one, fresh or resumed, and the startup provider owns which: `--resume <session>` inspects that session through persistence before publishing `resumeSessionId`, a bare `--resume` resolves its id through the launch picker first, and any other launch mints a fresh `sessionId` in the invoking directory. A missing or unreadable stored log refuses startup before dependent rows activate or the screen enters alternate mode. Both the agent row and the screen row read the same id from the provider, so neither depends on the other's mount order.
 
 ## Command line
 
@@ -19,9 +19,12 @@ The ordinary `tui-startup` provider ([`src/startup.ts`](src/startup.ts)) injects
 | `[task...]` | A first task, joined by spaces; the screen opens and starts on it. |
 | `--` | End app option parsing; following flag-shaped tokens are task text. |
 | `--resume <session>` | Continue a persisted session instead of starting a fresh one. |
+| `--resume` | With no session named, pick one at launch; the picker needs a TTY on both stdin and stdout. |
 | `--model <model>` | Model id for this session. |
 | `--provider <provider>` | Provider route for this session. |
 | `--no-color` | Render without ANSI styling. |
+
+A bare `--resume` opens the launch picker ([`dsh-tui`](../../ui/tui/README.md)'s `pickResumeSession`) on the ordinary terminal, ahead of any screen: it lists the persistence store's top-level sessions newest first, `↑`/`↓` or a number moves, `enter` resumes the cursor row, and `esc`/`ctrl+c` exits without starting anything. The picked id goes through the same inspection a named resume does. Every way the picker cannot produce a target refuses startup before dependent rows activate, so nothing is resumed and no session is created by surprise: no TTY on either stream, an unlistable store, nothing to offer (subagent children are delegation scratchpads, not conversations), a terminal too small for one candidate row, or a dismissed list. Each refusal names the explicit `--resume <session>` form or the fresh-session alternative.
 
 ## Model Experience
 

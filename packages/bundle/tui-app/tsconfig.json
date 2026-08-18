@@ -21,6 +21,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../ui/tui"
+    },
+    {
       "path": "../../session/session-persistence"
     },
     {

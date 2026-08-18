@@ -84,3 +84,5 @@ DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可�
 ## 推迟
 
 **第 C 层——其余的终端画面。** 此处每一项都需要终端尚不具备的界面：[`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md)、[`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md)、[`ui-workspace`](../../../../packages/client/ui-workspace/README.md)、[`ui-jobs`](../../../../packages/client/ui-jobs/README.md)、[`ui-subagent`](../../../../packages/client/ui-subagent/README.md)、[`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md)、[`ui-attachment`](../../../../packages/client/ui-attachment/README.md)，以及 `ui-settings` 系列。其中两项可以关闭 `dsh-tui` 仍记录为推迟的限制：缺失的会话切换器与行内图片，后者以 pi-tui 的 `Image` 组件为机制。同样推迟的还有编辑器层的触发检测本身（行中的 `/`、标点后的 `@`、后续行上的触发符、分组小标题），那需要一个支持它们的编辑器。
+
+启动时的会话恢复选择器 —— 会话切换的发现那一半，也是切换器否决所推荐的后续工作 —— 已另行实现（[启动时的会话恢复选择器](2026-08-18-tui-launch-resume-picker.md)）；它消除了启动时必须知道会话 id 的要求，但没有关闭终端内切换器这一项。

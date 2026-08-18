@@ -305,4 +305,61 @@ describe('dsh terminal journey snapshots', () => {
       await harness.dispose()
     }
   }, DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 5)
+
+  it('a bare --resume opens the launch picker and enter resumes the persisted session', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-tui-resume-pick-'))
+    try {
+      const first = createTuiHarness({ baseUrl: server?.baseURL ?? '', home })
+      try {
+        await first.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+        first.submit('hello there')
+        await first.waitFor(ANSWER, DEFAULT_TURN_TIMEOUT_MS)
+        expect(await first.exit()).toBe(0)
+      } finally {
+        await first.dispose()
+      }
+      const second = createTuiHarness({ baseUrl: server?.baseURL ?? '', home, args: ['--resume'] })
+      try {
+        await second.waitFor('Resume a session', DEFAULT_BOOT_TIMEOUT_MS)
+        await second.waitFor('enter resumes', DEFAULT_TURN_TIMEOUT_MS)
+        second.key('enter')
+        // The picked id boots through the same path a named resume takes:
+        // the replayed transcript and the footer appear with no re-prompt.
+        await second.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+        await second.waitFor('hello there', DEFAULT_TURN_TIMEOUT_MS)
+        await second.waitFor(ANSWER, DEFAULT_TURN_TIMEOUT_MS)
+        expect(await second.exit()).toBe(0)
+      } finally {
+        await second.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 2) * 2)
+
+  it('a bare --resume with esc refuses startup without resuming or creating anything', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-tui-resume-esc-'))
+    try {
+      const first = createTuiHarness({ baseUrl: server?.baseURL ?? '', home })
+      try {
+        await first.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+        first.submit('hello there')
+        await first.waitFor(ANSWER, DEFAULT_TURN_TIMEOUT_MS)
+        expect(await first.exit()).toBe(0)
+      } finally {
+        await first.dispose()
+      }
+      const second = createTuiHarness({ baseUrl: server?.baseURL ?? '', home, args: ['--resume'] })
+      try {
+        await second.waitFor('Resume a session', DEFAULT_BOOT_TIMEOUT_MS)
+        second.key('esc')
+        await second.waitFor('no session chosen', DEFAULT_TURN_TIMEOUT_MS)
+        await second.waitFor('name one with dsh --resume', DEFAULT_TURN_TIMEOUT_MS)
+      } finally {
+        await second.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 2) * 2)
 })
