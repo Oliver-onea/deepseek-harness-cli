@@ -17,7 +17,9 @@ Add keyless, deterministic journey snapshots under `apps/cli/tests/tui-interacti
 1. **Slash menu (`/`)** — type `/he`, wait for the live command registry to filter, press `enter`, and snapshot the dispatched `/help` command line.
 2. **`/help` text** — submit `/help` and snapshot the live registry rendered as plain text, including command names, hints, and descriptions.
 3. **Subagent mention (`@`)** — stage one deterministic running subagent child without a model turn, type `@`, pick the child, and snapshot the reference in the composer.
-4. **Model picker (`/model`)** — open the picker, dismiss with `esc`, reopen, move down to `deepseek-official/deepseek-v4-pro`, apply with `enter`, and snapshot the confirmation.
+4. **Skill source in slash menu (`/`)** — stage one deterministic user-invocable skill without a model turn, type `/jou`, wait for the skill to appear after the command roster, press `enter`, and snapshot the resulting user prompt and mock answer in the transcript.
+5. **`@` empty roster** — without the child-staging patch, type `@` and snapshot that the menu never opens and the `@` stays in the composer.
+6. **Model picker (`/model`)** — open the picker, dismiss with `esc`, reopen, move down to `deepseek-official/deepseek-v4-pro`, apply with `enter`, and snapshot the confirmation.
 
 ### Staging a running child for the `@` case
 
@@ -28,6 +30,16 @@ The `@` menu needs a running subagent child to offer. A real model turn would ma
 - It appends a `subagent/descriptor` with `mode: 'continuable'`, `provider: 'spawn'`, and `label: 'journey-child'`.
 
 The child is live in the session store, so `subagents.listChildren` returns it with activity `running`, and the `@` menu lists `journey-child`.
+
+### Staging a skill for the `/` skill case
+
+The `/` menu needs a user-invocable skill to offer. A real model turn would make the test non-deterministic and would require a key, so a fixture plugin (`apps/cli/tests/fixtures/tui-journey/stage-skill.ts`) is injected via `--patch`:
+
+- It waits for the terminal's agent to appear, using the same `TUI_STARTUP_SERVICE` pattern as the child fixture.
+- It registers a runtime skill with `ctx.skills.register`, in the global layer where the agent's scope chain can see it.
+- It waits for the skill to be observable through `ctx.skills.list({ scope: agent })`, the same catalog path the menu uses.
+
+The skill is real in the registry, so the menu lists it after the command roster and a pick ships `/journey-skill` to the model as ordinary prompt text.
 
 ### Harness changes
 
@@ -62,6 +74,10 @@ Result: 10/10 passed.
 
 **A stubbed subagent roster.** Rejected: a snapshot that fakes the state it claims to prove is worse than an absent one. Staging real session-store state keeps the assertion about the wiring, not about the stub.
 
+**A real model turn or a stubbed skill catalog to produce the `/` skill.** Rejected for the same reason: a key makes the test non-deterministic, and a stubbed catalog proves the menu rendering rather than the live skill source. The skill fixture registers a real runtime skill and asserts it is visible through `ctx.skills.list({ scope: agent })`.
+
+**A filesystem skill instead of a runtime registration.** Rejected: it would couple the test to the filesystem provider's project-root discovery and file watching, adding nondeterminism and I/O. A runtime registration is scoped, synchronous, and tears down with the fixture.
+
 **`/exit` for teardown in the `@` case.** Rejected: that case deliberately leaves `@journey-child x` in the composer, so `/exit` would append to the line rather than run the command. `cancel()` sends `ctrl+c`, which exits cleanly when no turn is running.
 
 **Asserting raw PTY bytes rather than a rendered grid.** Rejected: pi-tui's differential rendering and synchronized output make byte order an implementation detail, so byte-level assertions would break on redraw changes that a reader never sees. The emulator interprets and strips ANSI so the snapshot pins what a person reads.
@@ -70,21 +86,25 @@ Result: 10/10 passed.
 
 ## Acceptance criteria
 
-- Journey snapshots exist for `/`, `/help`, `@`, and `/model` and pass keylessly.
+- Journey snapshots exist for `/`, `/help`, `@`, `/` skill source, `@` empty roster, and `/model` and pass keylessly.
 - Ten consecutive runs pass without flake.
 - `pnpm run doc-sync` (28 gates), `pnpm run typecheck`, and `pnpm run hygiene` remain green.
-- Baseline `pnpm vitest run packages/ui/tui packages/bundle/tui-app apps/cli/tests/tui-interaction.spec.ts` increases from 336 passed / 16 files and breaks nothing.
+- Baseline `pnpm vitest run packages/ui/tui packages/bundle/tui-app apps/cli/tests/tui-interaction.spec.ts` increases to 359 passed / 16 files and breaks nothing.
 - `packages/ui/tui/` is not modified.
 
 ## Consequences
 
-Assembled terminal interaction coverage now lives in `apps/cli/tests/` alongside the harness. Future shipped terminal features add journey snapshots there instead of leaving an honest gap. The fixture plugin is a reusable pattern for staging deterministic subagent children in keyless CLI tests.
+Assembled terminal interaction coverage now lives in `apps/cli/tests/` alongside the harness. Future shipped terminal features add journey snapshots there instead of leaving an honest gap. The fixture plugins are a reusable pattern for staging deterministic subagent children and user-invocable skills in keyless CLI tests.
 
 ## Risks
 
 - The screen emulator remains minimal. If pi-tui changes the sequences it emits, snapshots may drift. The risk is bounded because the layout sequences used today are stable.
 - The `@` case depends on the subagent list projection treating a live child session with a descriptor as running. If that projection changes, the fixture must be updated, but the snapshot itself will fail honestly.
+- The `/` skill case depends on the skill registry exposing global runtime registrations to the agent's scope chain. If that visibility rule changes, the fixture must be updated, but the snapshot will fail honestly.
 
 ## Gaps
 
-- The `@` empty-roster case is not separately snapshotted. The fixture always stages one child; an empty roster would require a second case without the patch plugin.
+- Closed: `@` empty-roster case is now covered by a dedicated snapshot without the child-staging patch.
+- Closed: `/` skill-source case is now covered by a dedicated snapshot with a real runtime skill.
+- Closed: the `/help` teardown flake was a startup/exit race, not SIGPIPE. Instrumentation showed the child exiting with code 13 and Node printing `Warning: Detected unsettled top-level await at apps/cli/src/bin.ts:33`. Under aggregate-suite contention the harness sent `/exit` while `profile-boot.ts` was still awaiting post-boot watcher setup, so the top-level `await runProfile(...)` was still pending when the process exited. The harness now waits for the PTY to be idle for `TEARDOWN_QUIET_MS` before teardown writes and guards those writes when the child has already exited, giving the CLI time to finish startup without masking a real non-zero exit. Verified with the aggregate command below.
+  - `env -u FORCE_COLOR -u NO_COLOR pnpm vitest run packages/ui/tui packages/bundle/tui-app apps/cli/tests/tui-interaction.spec.ts`: **10/10 passed**.
