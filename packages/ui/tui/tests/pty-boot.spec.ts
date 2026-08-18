@@ -383,6 +383,21 @@ describe('the dsh terminal profile under a real PTY', () => {
   }, BOOT_TIMEOUT_MS)
 })
 
+/**
+ * The conversation request one probe produced: the tool-carrying request whose
+ * messages name the probe text. Title generation carries the probe framed but
+ * never the session's tools, so it cannot match.
+ * @param served - the requests recorded since the probe.
+ * @param probe - text the probe submitted.
+ * @returns the matched request body, or `undefined` when none arrived yet.
+ */
+function conversationBody(served: readonly { body: unknown }[], probe: string): unknown {
+  return served
+    .filter(request => JSON.stringify(request.body).includes(probe)
+      && Array.isArray((request.body as { tools?: unknown[] }).tools))
+    .at(-1)?.body
+}
+
 describe('the /model command under a real PTY', () => {
   it('picks from the live catalog, survives esc with queued work, and routes the next request', async () => {
     const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
@@ -462,6 +477,117 @@ describe('the /model command under a real PTY', () => {
       await harness.dispose()
     }
   }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 3)
+
+  it('drills the effort tier, returns to the list on esc, and pins an effort', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+
+      // The tier lists the adapter's declared efforts with the effective one
+      // (the model's default, nothing picked yet) marked.
+      harness.submit('/model')
+      await harness.waitFor('deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+      harness.key('right')
+      await harness.waitFor('Effort', TURN_TIMEOUT_MS)
+      await harness.waitFor('off — Off', TURN_TIMEOUT_MS)
+      await harness.waitFor('high — High', TURN_TIMEOUT_MS)
+      await harness.waitFor('max — Max', TURN_TIMEOUT_MS)
+      await harness.waitFor('● high — High', TURN_TIMEOUT_MS)
+
+      // Esc from the tier returns to the model list — the panel survives with
+      // its cursor, and the list draws its routes again.
+      harness.key('esc')
+      await harness.waitFor('● deepseek-official/deepseek-v4-flash', TURN_TIMEOUT_MS)
+
+      // Drill again and pin `max` by number: the switch notice names it.
+      harness.key('right')
+      await harness.waitFor('Effort', TURN_TIMEOUT_MS)
+      harness.type('4')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-flash (reasoning max)', TURN_TIMEOUT_MS)
+
+      // The next conversation request carries the pinned effort on the wire.
+      const before = server?.requests.length ?? 0
+      harness.submit('after the effort pick')
+      await harness.waitFor('after the effort pick', TURN_TIMEOUT_MS)
+      await when(() => conversationBody(server?.requests.slice(before) ?? [], 'after the effort pick') !== undefined, TURN_TIMEOUT_MS)
+      const served = server?.requests.slice(before) ?? []
+      expect((conversationBody(served, 'after the effort pick') as { reasoning_effort?: string }).reasoning_effort).toBe('max')
+
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 6)
+
+  it('esc from the effort tier keeps a running turn and its queued follow-up', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+
+      // Open a turn, then queue a second prompt behind it.
+      harness.submit('first question')
+      await harness.waitFor('first question', TURN_TIMEOUT_MS)
+      harness.submit('second question')
+      await harness.waitFor('second question', TURN_TIMEOUT_MS)
+
+      // Dismiss through both panel states — tier, then list: neither esc
+      // reaches the agent, so the running turn and its queued follow-up both
+      // reach the model.
+      harness.submit('/model')
+      await harness.waitFor('deepseek-official/deepseek-v4-pro', TURN_TIMEOUT_MS)
+      harness.key('right')
+      await harness.waitFor('Effort', TURN_TIMEOUT_MS)
+      harness.key('esc')
+      await harness.waitFor('● deepseek-official/deepseek-v4-flash', TURN_TIMEOUT_MS)
+      harness.key('esc')
+      await harness.waitFor(ANSWER, TURN_TIMEOUT_MS)
+      await new Promise(resolve => setTimeout(resolve, TURN_TIMEOUT_MS))
+      expect(server?.requests.length ?? 0).toBeGreaterThanOrEqual(2)
+
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 5)
+
+  it('pins an effort by argument and refuses an unknown one at pick time', async () => {
+    const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
+    try {
+      await harness.waitFor('ready', BOOT_TIMEOUT_MS)
+
+      harness.submit('/model deepseek-v4-pro max')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning max)', TURN_TIMEOUT_MS)
+
+      // An unknown effort is refused at pick time, naming what is available,
+      // and the pinned selection stays: a bare re-pick of the same route
+      // keeps the in-force effort instead of resetting to the default.
+      harness.submit('/model deepseek-v4-pro turbo')
+      await harness.waitFor(
+        'unknown effort "turbo" for deepseek-official/deepseek-v4-pro; available: default, off, high, max',
+        TURN_TIMEOUT_MS,
+      )
+      harness.submit('/model deepseek-v4-pro')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning max)', TURN_TIMEOUT_MS)
+
+      // An explicit switch names the effort it replaces.
+      harness.submit('/model deepseek-v4-pro off')
+      await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off, was max)', TURN_TIMEOUT_MS)
+
+      const before = server?.requests.length ?? 0
+      harness.submit('effort probe')
+      await harness.waitFor('effort probe', TURN_TIMEOUT_MS)
+      await when(() => conversationBody(server?.requests.slice(before) ?? [], 'effort probe') !== undefined, TURN_TIMEOUT_MS)
+      const served = server?.requests.slice(before) ?? []
+      const body = conversationBody(served, 'effort probe') as { reasoning_effort?: string; thinking?: { type?: string } }
+      // `off` rides the wire as disabled thinking, never as a wire effort.
+      expect(body.reasoning_effort).toBeUndefined()
+      expect(body.thinking?.type).toBe('disabled')
+
+      expect(await harness.exit()).toBe(0)
+    } finally {
+      await harness.dispose()
+    }
+  }, BOOT_TIMEOUT_MS + TURN_TIMEOUT_MS * 6)
 
   it('yields the picker on a 20x5 terminal and keeps the input usable', async () => {
     const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '', cols: 20, rows: 5 })
