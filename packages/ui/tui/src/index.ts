@@ -42,6 +42,15 @@ import type { ToolPresenter } from './view.ts'
 
 export type { CardLayout, ToolCard } from './tool-card.ts'
 export type * from './transcript.ts'
+export {
+  pickResumeSession,
+  resumeCandidates,
+  type PickerStdin,
+  type PickerStdout,
+  type ResumeCandidate,
+  type ResumePickerOptions,
+  type ResumePickerOutcome,
+} from './resume-picker.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'tui'
