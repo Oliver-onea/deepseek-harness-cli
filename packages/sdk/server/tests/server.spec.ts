@@ -30,6 +30,27 @@ class FakeTransport implements JsonRpcTransportPeer {
 
 const servers: Server[] = []
 
+/** The `turn/end` reason kinds a FakeTransport observed, in notification order. */
+function turnEndReasons(transport: FakeTransport): string[] {
+  return transport.notifications
+    .filter(n => n.method === 'session.event' && (n.params?.event as { type?: string } | undefined)?.type === 'turn/end')
+    .map(n => (n.params?.event as { data: { reason: { kind: string } } }).data.reason.kind)
+}
+
+/** Count cancel-driven inbox discards (splices logged with `outcome: 'canceled'`). */
+function canceledSpliceCount(transport: FakeTransport): number {
+  return transport.notifications.filter((n) => {
+    if (n.method !== 'session.event') return false
+    const event = n.params?.event as { type?: string; data?: { outcome?: string } } | undefined
+    return event?.type === 'agent/inbox/spliced' && event.data?.outcome === 'canceled'
+  }).length
+}
+
+/** Drain asynchronous work before a negative assertion. */
+async function settle(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 100))
+}
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))))
   vi.unstubAllEnvs()
@@ -57,6 +78,34 @@ async function mockCompletionServer(): Promise<{ url: string; requests: unknown[
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('no port')
   return { url: `http://127.0.0.1:${address.port}`, requests, headers }
+}
+
+/** SSE endpoint whose FIRST request streams one chunk then hangs until the client aborts; later requests complete. */
+async function mockHangingFirstCompletionServer(): Promise<{ url: string; requests: { body: unknown; headers: IncomingMessage['headers'] }[] }> {
+  const requests: { body: unknown; headers: IncomingMessage['headers'] }[] = []
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    let body = ''
+    request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+    request.on('end', () => {
+      requests.push({ body: JSON.parse(body), headers: request.headers })
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: {"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":""}}]}\n\n')
+      if (requests.length === 1) {
+        // The first turn stays in flight; the adapter's abort (or harness
+        // disposal) destroys the socket, which is what ends this response.
+        return
+      }
+      response.write('data: {"choices":[{"delta":{"content":"done"}}]}\n\n')
+      response.write('data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\n')
+      response.write('data: [DONE]\n\n')
+      response.end()
+    })
+  })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no port')
+  return { url: `http://127.0.0.1:${address.port}`, requests }
 }
 
 async function makeHarness(storageDir: string) {
@@ -239,6 +288,150 @@ describe('HarnessSdkJsonRpcServer', () => {
     await expect(prompt('after detach')).rejects.toThrow('session agent was disposed outside the server: zombie')
     // The detached agent was never driven by the rejected prompt.
     expect(followup).toHaveBeenCalledOnce()
+    await server.shutdown()
+  })
+
+  it('aborts the active turn and clears queued work by default', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-interrupt-'))
+    const llmServer = await mockHangingFirstCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const ctx = await makeHarness(storageDir)
+    try {
+      const transport = new FakeTransport()
+      const server = new HarnessSdkJsonRpcServer(ctx, transport)
+      await server.initialize({ cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' })
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'first' }] })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(1) })
+      // Queued behind the hung turn; the default interrupt splices it out
+      // before its response settles.
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'queued' }] })
+
+      await expect(server.handleRequest('session/interrupt', { sessionId: 'main' })).resolves.toEqual({})
+
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['aborted']) })
+      await vi.waitFor(() => {
+        expect(transport.notifications.findLast(n => n.method === 'session.status')).toEqual({
+          method: 'session.status',
+          params: { sessionId: 'main', status: 'idle' },
+        })
+      })
+      // The clear is durable: the queued prompt was discarded by a canceled splice.
+      expect(canceledSpliceCount(transport)).toBe(1)
+      // The cleared prompt never became a turn or a model request.
+      await settle()
+      expect(transport.notifications.filter(n =>
+        n.method === 'session.event' && (n.params?.event as { type?: string }).type === 'turn/start')).toHaveLength(1)
+      expect(llmServer.requests).toHaveLength(1)
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('parks queued work across the abort when keepInbox is set', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-interrupt-keep-'))
+    const llmServer = await mockHangingFirstCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const ctx = await makeHarness(storageDir)
+    try {
+      const transport = new FakeTransport()
+      const server = new HarnessSdkJsonRpcServer(ctx, transport)
+      await server.initialize({ cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' })
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'first' }] })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(1) })
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'queued' }] })
+
+      await expect(server.handleRequest('session/interrupt', { sessionId: 'main', keepInbox: true }))
+        .resolves.toEqual({})
+
+      // Preserved work is NOT discarded and does not start a turn by itself:
+      // it stays parked until a later waking prompt claims it.
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['aborted']) })
+      expect(canceledSpliceCount(transport)).toBe(0)
+      await settle()
+      expect(llmServer.requests).toHaveLength(1)
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'third' }] })
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['aborted', 'completed', 'completed']) })
+      expect(llmServer.requests).toHaveLength(3)
+      const second = llmServer.requests[1]?.body as { messages: unknown[] }
+      expect(JSON.stringify(second.messages.at(-1))).toContain('queued')
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('accepts an interrupt on an idle session without arming later work', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-interrupt-idle-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const ctx = await makeHarness(storageDir)
+    try {
+      const transport = new FakeTransport()
+      const server = new HarnessSdkJsonRpcServer(ctx, transport)
+      await server.initialize({ cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' })
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'first' }] })
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['completed']) })
+
+      await expect(server.handleRequest('session/interrupt', { sessionId: 'main' })).resolves.toEqual({})
+
+      // The no-op armed nothing: the next prompt runs its own ordinary turn.
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'second' }] })
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['completed', 'completed']) })
+      expect(llmServer.requests).toHaveLength(2)
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('validates interrupt params at the wire boundary and fails loud on unknown sessions', async () => {
+    const cancel = vi.fn<Agent['cancel']>()
+    const followup = vi.fn<Agent['followup']>()
+    const agent = ({
+      id: SessionId('main'),
+      followup,
+      cancel,
+    } satisfies Pick<Agent, 'id' | 'followup' | 'cancel'>) as unknown as Agent
+    const handle = { agent, dispose: vi.fn(() => Promise.resolve()) }
+    const liveAgents = new Map<string, Agent>([['main', agent]])
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      agents: {
+        create: vi.fn(async () => handle),
+        get: (id: SessionId) => liveAgents.get(String(id)),
+      },
+      get: () => undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'seed' }] })
+
+    // Malformed params and unknown ids never reach the agent.
+    await expect(server.handleRequest('session/interrupt', {}))
+      .rejects.toThrow('session/interrupt sessionId must be a string')
+    await expect(server.handleRequest('session/interrupt', { sessionId: 7 }))
+      .rejects.toThrow('session/interrupt sessionId must be a string')
+    await expect(server.handleRequest('session/interrupt', { sessionId: 'main', keepInbox: 'yes' }))
+      .rejects.toThrow('session/interrupt keepInbox must be a boolean when given')
+    await expect(server.handleRequest('session/interrupt', { sessionId: 'missing' }))
+      .rejects.toThrow('unknown SDK session for session/interrupt: missing')
+    expect(cancel).not.toHaveBeenCalled()
+
+    expect(await server.handleRequest('session/interrupt', { sessionId: 'main' })).toEqual({})
+    expect(cancel).toHaveBeenLastCalledWith({ kind: 'user' }, { keepInbox: undefined })
+    expect(await server.handleRequest('session/interrupt', { sessionId: 'main', keepInbox: true })).toEqual({})
+    expect(cancel).toHaveBeenLastCalledWith({ kind: 'user' }, { keepInbox: true })
+    expect(cancel).toHaveBeenCalledTimes(2)
     await server.shutdown()
   })
 

@@ -18,11 +18,12 @@ import {
   JsonRpcResponseError,
   type InitializeParams,
   type InitializeResult,
+  type SessionInterruptParams,
   type SessionPromptParams,
 } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { disposeRuntimeProcess } from './dispose.ts'
-import type { HarnessClientOptions, HarnessNotification, NotificationFilter } from './types.ts'
+import type { HarnessClientOptions, HarnessNotification, NotificationFilter, SessionInterruptOptions } from './types.ts'
 
 /** Retained stderr lines used to diagnose an unexpected runtime death. */
 const STDERR_TAIL_LIMIT = 400
@@ -177,9 +178,9 @@ class NotificationSubscriptionImpl implements NotificationSubscription {
  *
  * The subprocess starts lazily on {@link start} and is owned by this instance
  * until {@link close}, which requests protocol `shutdown` and then walks the
- * shared EOF → SIGTERM → SIGKILL dispose ladder to quiescence. There is no
- * wire-level cancel: a timed-out request stays running server-side until the
- * runtime is closed.
+ * shared EOF → SIGTERM → SIGKILL dispose ladder to quiescence. A request
+ * timeout is client-side abandonment only — the server-side work runs on;
+ * stopping a session's work is {@link interrupt}'s job.
  */
 export class HarnessClient {
   private child: ChildProcess | undefined
@@ -287,6 +288,23 @@ export class HarnessClient {
       throw new SdkProtocolError(`session/prompt returned no message id: ${JSON.stringify(result)}`)
     }
     return result.messageId
+  }
+
+  /**
+   * Interrupt one session's active turn. Queued and steering work is cleared
+   * unless `options.keepInbox` preserves it (preserved work stays parked
+   * until a later waking prompt claims it). An idle session accepts the
+   * interrupt as a no-op; an unknown session id rejects with the wire error
+   * naming it. The abort itself is observed through notifications.
+   * @param sessionId - target session; it must already exist server-side.
+   * @param options - `keepInbox` preserves queued and steering work.
+   */
+  async interrupt(sessionId: string, options?: SessionInterruptOptions): Promise<void> {
+    const params: SessionInterruptParams = { sessionId, ...options }
+    const result = await this.request('session/interrupt', { ...params })
+    if (!isRecord(result)) {
+      throw new SdkProtocolError(`session/interrupt returned a non-object result: ${JSON.stringify(result)}`)
+    }
   }
 
   /**

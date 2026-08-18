@@ -70,5 +70,14 @@ export interface RunResult {
   notifications: HarnessNotification[]
 }
 
+/** Options for `HarnessClient.interrupt` and `HarnessSession.interrupt`. */
+export interface SessionInterruptOptions {
+  /**
+   * Preserve queued and steering inbox items; omitted clears them (the wire
+   * default). Preserved work stays parked until a later waking prompt claims it.
+   */
+  keepInbox?: boolean
+}
+
 /** Re-exported content-block alias so SDK callers need no extra import. */
 export type { ContentBlock }

@@ -26,4 +26,5 @@ export type {
   HarnessNotification,
   NotificationFilter,
   RunResult,
+  SessionInterruptOptions,
 } from './types.ts'

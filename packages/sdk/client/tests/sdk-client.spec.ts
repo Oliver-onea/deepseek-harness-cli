@@ -240,6 +240,65 @@ describe('DeepSeekHarness', () => {
     // After scope exit the runtime is closed: reuse fails loudly.
     await expect(captured.run('after')).rejects.toThrow(TransportClosedError)
   })
+
+  it('settles a hung run when the session is interrupted mid-turn', async () => {
+    const harness = harnessWith({ FAKE_HANG_TURN: '1' })
+    await harness.start()
+    const session = harness.session('interruptible')
+    const watch = harness.client.subscribeSessionTree(session.id)
+    const running = session.run('long task')
+    // Deterministic ordering: the interrupt lands only after the runtime has
+    // accepted the prompt and reported the session running.
+    for (;;) {
+      const notification = await watch.next()
+      if (notification.method === 'session.status' && notification.params.status === 'running') break
+    }
+    await session.interrupt()
+    const result = await running
+    watch.close()
+
+    const turnEnd = result.events.find(event => event.type === 'turn/end')
+    expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason.kind).toBe('aborted')
+    expect(result.finalResponse).toBe('')
+    await harness.close()
+  })
+})
+
+describe('HarnessClient interrupt', () => {
+  it('sends keepInbox on the wire only when given, and an idle session accepts the interrupt', async () => {
+    const dir = await tempDir('sdk-client-interrupt-')
+    const recordFile = join(dir, 'interrupts.jsonl')
+    const harness = harnessWith({ FAKE_RECORD_INTERRUPT: recordFile })
+    const session = harness.session('recorded')
+    await session.run('seed the session')
+    // Both interrupts land on an idle session: accepted as no-ops.
+    await session.interrupt()
+    await session.interrupt({ keepInbox: true })
+    await harness.close()
+
+    const records = (await readFile(recordFile, 'utf8')).trim().split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(records).toEqual([{ sessionId: 'recorded' }, { sessionId: 'recorded', keepInbox: true }])
+  })
+
+  it('rejects interrupting a session the runtime does not know', async () => {
+    const harness = harnessWith()
+    const failure = await harness.session('missing').interrupt().then(
+      () => { throw new Error('interrupt unexpectedly succeeded') },
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(JsonRpcResponseError)
+    expect((failure as JsonRpcResponseError).message).toContain('missing')
+    await harness.close()
+  })
+
+  it('rejects a non-object interrupt result as a protocol error', async () => {
+    const harness = harnessWith({ FAKE_MALFORMED_INTERRUPT: '1' })
+    const session = harness.session('malformed-interrupt')
+    await session.run('seed the session')
+    await expect(session.interrupt()).rejects.toThrow(SdkProtocolError)
+    await harness.close()
+  })
 })
 
 describe('HarnessClient', () => {

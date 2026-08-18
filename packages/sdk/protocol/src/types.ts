@@ -1,5 +1,5 @@
 /**
- * Named wire types for the DeepSeek Harness SDK runtime protocol: the three
+ * Named wire types for the DeepSeek Harness SDK runtime protocol: the four
  * request/result pairs and the four server-to-client notification payloads
  * exchanged over the newline-delimited JSON-RPC stdio transport. The server
  * plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share these shapes;
@@ -43,6 +43,26 @@ export interface SessionPromptResult {
   /** Identity of the queued user message. */
   messageId: string
 }
+
+/** Stop one SDK session's active turn, with explicit queued-work semantics. */
+export interface SessionInterruptParams {
+  /** The SDK-side session id; unlike `session/prompt`, an unknown id fails instead of creating the session. */
+  sessionId: string
+  /**
+   * Preserve queued and steering inbox items while the active turn aborts;
+   * preserved work stays parked until a later waking prompt claims it.
+   * Omission clears them (the `Agent.cancel` default), so a bare interrupt
+   * stops all pending work on the session.
+   */
+  keepInbox?: boolean
+}
+
+/**
+ * Acceptance receipt for `session/interrupt`: the session exists and the
+ * params were valid. The abort itself is observed through `session.event`
+ * and `session.status`, and an idle session accepts the interrupt as a no-op.
+ */
+export type SessionInterruptResult = Record<string, never>
 
 /** Deployment-mapped SDK outcome: `ok` for an accepted result, `error` otherwise. */
 export type SdkRunStatus = 'ok' | 'error'
@@ -101,5 +121,6 @@ export interface HarnessSdkNotificationMap {
 export interface HarnessSdkRequestMap {
   'initialize': { params: InitializeParams; result: InitializeResult }
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
+  'session/interrupt': { params: SessionInterruptParams; result: SessionInterruptResult }
   'shutdown': { params: undefined; result: Record<string, never> }
 }

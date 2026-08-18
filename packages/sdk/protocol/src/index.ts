@@ -17,6 +17,8 @@ export type {
   InitializeResult,
   SdkRunStatus,
   SessionEventNotification,
+  SessionInterruptParams,
+  SessionInterruptResult,
   SessionStatusNotification,
   SessionPromptParams,
   SessionPromptResult,

@@ -212,6 +212,47 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
     }
   })
 
+  it('answers session/interrupt over the wire and errors on unknown sessions', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-interrupt-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const harness = await mountPlugin(storageDir)
+    try {
+      harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
+      await harness.waitForFrame(frame => frame.id === 1, 'initialize response')
+      harness.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'fix it' }] },
+      })
+      await harness.waitForFrame(frame => frame.id === 2, 'prompt response')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status',
+      )
+
+      // The settled session accepts the interrupt as a no-op.
+      harness.send({ jsonrpc: '2.0', id: 3, method: 'session/interrupt', params: { sessionId: 'main' } })
+      const interrupt = await harness.waitForFrame(frame => frame.id === 3, 'interrupt response')
+      expect(interrupt).toEqual({ jsonrpc: '2.0', id: 3, result: {} })
+
+      // An unknown session id fails loud and names the id.
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'session/interrupt', params: { sessionId: 'ghost' } })
+      const unknown = await harness.waitForFrame(frame => frame.id === 4, 'unknown-session error response')
+      expect(unknown).toEqual({
+        jsonrpc: '2.0',
+        id: 4,
+        error: { code: -32603, message: 'unknown SDK session for session/interrupt: ghost' },
+      })
+    } finally {
+      await harness.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
   it('answers shutdown before exiting 0 exactly once, even against a racing second shutdown', async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-shutdown-'))
     const harness = await mountPlugin(storageDir, { writeDelayMs: 10 })
