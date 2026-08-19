@@ -151,6 +151,18 @@ export class HarnessSession {
   }
 
   /**
+   * Steer this session: the content joins the running turn at its next step
+   * boundary, or opens the next turn when the session is idle. A session the
+   * runtime does not know rejects with a wire error naming the id.
+   * @param input - steering text, or content blocks sent verbatim.
+   * @returns the spliced message id.
+   */
+  async steer(input: string | ContentBlock[]): Promise<string> {
+    await this.harness.start()
+    return this.harness.client.steer(this.id, normalizeInput(input))
+  }
+
+  /**
    * Queue one prompt, then observe the whole session through its next idle.
    * @param input - prompt text, or content blocks sent verbatim.
    * @param options - optional per-notification observer.
