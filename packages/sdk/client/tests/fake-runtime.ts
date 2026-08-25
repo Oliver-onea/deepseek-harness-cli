@@ -42,6 +42,10 @@
  *   (steer wire probe); the steer itself splices a `next-step` receipt.
  * - `FAKE_MALFORMED_INTERRUPT`: `session/interrupt` answers a non-object result
  *   (wire-validation probe).
+ * - `FAKE_APPROVAL_ASK`: each accepted prompt also sends one server→client
+ *   `approval/request` mid-turn (approval handler probe).
+ * - `FAKE_RECORD_APPROVAL_RESPONSE`: append each client response frame to the
+ *   fake's own server→client requests to this file (approval probe).
  * - `FAKE_STREAM_THEN_MALFORMED`: stream a text chunk for the prompt, then
  *   answer `{}` (no accepted) — same-pipe ordering makes the chunk arrive
  *   before the protocol failure (partial-output retention probe).
@@ -171,7 +175,14 @@ const reader = createInterface({ input: process.stdin })
 reader.on('line', (line) => {
   if (line.trim().length === 0) return
   const frame = JSON.parse(line) as { id?: string | number; method?: string; params?: Record<string, unknown> }
-  if (frame.method === undefined || frame.id === undefined) return
+  // A response to a server→client request this fake sent (approval probe).
+  if (frame.method === undefined) {
+    if (frame.id !== undefined && env.FAKE_RECORD_APPROVAL_RESPONSE !== undefined) {
+      appendFileSync(env.FAKE_RECORD_APPROVAL_RESPONSE, `${JSON.stringify(frame)}\n`)
+    }
+    return
+  }
+  if (frame.id === undefined) return
   const respond = (result: object): void => { write({ jsonrpc: '2.0', id: frame.id, result }) }
   switch (frame.method) {
     case 'initialize':
@@ -222,6 +233,16 @@ reader.on('line', (line) => {
         }],
       })
       notify('session.status', { sessionId, status: 'running' })
+      // Ask the wire client to decide one approval mid-turn (approval probe);
+      // the recorded response frame observes whether a handler answered.
+      if (env.FAKE_APPROVAL_ASK !== undefined) {
+        write({
+          jsonrpc: '2.0',
+          id: `fake-approval-${seq}`,
+          method: 'approval/request',
+          params: { sessionId, toolName: 'bash', reason: 'fake escalation' },
+        })
+      }
       if (env.FAKE_STREAM_THEN_MALFORMED !== undefined) {
         event(sessionId, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'streamed then cut short' } })
         respond({})

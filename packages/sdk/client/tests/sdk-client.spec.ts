@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DeepSeekHarness,
   HarnessClient,
@@ -292,6 +292,43 @@ describe('HarnessClient steer', () => {
     expect(failure).toBeInstanceOf(JsonRpcResponseError)
     expect((failure as JsonRpcResponseError).message).toContain('missing')
     await harness.close()
+  })
+})
+
+describe('HarnessClient approval', () => {
+  it('answers server approval questions through the installed handler', async () => {
+    const dir = await tempDir('sdk-client-approval-')
+    const recordFile = join(dir, 'approval-responses.jsonl')
+    const asks: unknown[] = []
+    const harness = new DeepSeekHarness({
+      launch: fakeLaunch({ FAKE_APPROVAL_ASK: '1', FAKE_RECORD_APPROVAL_RESPONSE: recordFile }),
+      onApproval: async (request) => {
+        asks.push({ ...request })
+        return { outcome: 'allowed-once' }
+      },
+    })
+    cleanups.push(() => harness.close())
+    const result = await harness.run('needs approval')
+    expect(asks).toEqual([{ sessionId: result.sessionId, toolName: 'bash', reason: 'fake escalation' }])
+    const responses = await vi.waitFor(async () =>
+      (await readFile(recordFile, 'utf8')).trim().split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>))
+    expect(responses).toEqual([{ jsonrpc: '2.0', id: 'fake-approval-1', result: { outcome: 'allowed-once' } }])
+  })
+
+  it('answers an unhandled approval question with an error response the runtime fails closed on', async () => {
+    const dir = await tempDir('sdk-client-approval-unhandled-')
+    const recordFile = join(dir, 'approval-responses.jsonl')
+    const harness = harnessWith({ FAKE_APPROVAL_ASK: '1', FAKE_RECORD_APPROVAL_RESPONSE: recordFile })
+    await harness.run('needs approval')
+    // The response frame crosses processes; poll for the fake's record.
+    const responses = await vi.waitFor(async () =>
+      (await readFile(recordFile, 'utf8')).trim().split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>))
+    const response = responses[0] as { id?: unknown; error?: { code?: unknown; message?: unknown } }
+    expect(response.id).toBe('fake-approval-1')
+    expect(response.error?.code).toBe(-32603)
+    expect(String(response.error?.message)).toContain('no handler')
   })
 })
 

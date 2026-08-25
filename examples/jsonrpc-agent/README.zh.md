@@ -28,6 +28,10 @@
 
 通过 Python SDK 的 `cordis` 选项或 `DSH_CORDIS_CONFIG` 传入配置路径。内置可执行文件已携带此文件中指定的每个插件；目标机器无需 Node.js。
 
+## 审批变体
+
+[`approval.cordis.yml`](approval.cordis.yml) 在此组合之上加入审批（approval）服务与 Claude Code `PreToolUse` hook 桥：hook 的 `ask` 决定把 bash 调用交给 `ctx.approval`，SDK 服务器再把问题以 `approval/request` 送达协议客户端。hook 由 `DSH_CWD` 下的 `hooks.json` 提供。[`approval.snapshot.cordis.yml`](approval.snapshot.cordis.yml) 是它的无密钥重放对应物；其 patch id 解析于直接 include 的树，因此它重复这些插入而不是嵌套在 `approval.cordis.yml` 之后。
+
 ## 极简变体
 
 [`minimal.cordis.yml`](minimal.cordis.yml) 是 Web `minimal` preset 的完整独立版本。`DSH_SYSTEM_PROMPT` 选择它的系统提示词，未设置时使用 `You are a helpful software engineer assistant.`。它为新建会话抑制每个 system-prompt runtime-context 贡献，且不挂载上下文压缩插件。面向模型的工具严格只有：

@@ -1,0 +1,18 @@
+# Approval-flow composition for the SDK snapshot scenario: the base jsonrpc
+# deployment plus the approval service and the Claude Code hook bridge whose
+# PreToolUse `ask` decision routes bash calls through `ctx.approval` — the SDK
+# server forwards the question to the wire client as `approval/request`.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: approval
+            name: '@deepseek-ai/dsh-user-approval'
+          - id: hooks-cc
+            name: '@deepseek-ai/dsh-hooks-claude-code'
+            config:
+              # Process-level path resolved against the runtime's workspace
+              # cwd; the scenario writes hooks.json there before launch.
+              configPath: !!js "process.env.DSH_CWD + '/hooks.json'"

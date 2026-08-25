@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, join } from 'node:path'
+import { basename, delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -36,6 +36,8 @@ const liveConfig = join(testsDir, '..', 'cordis.yml')
 const replayConfig = join(testsDir, '..', 'cordis.snapshot.yml')
 const minimalLiveConfig = join(testsDir, '..', 'minimal.cordis.yml')
 const minimalReplayConfig = join(testsDir, '..', 'minimal.snapshot.cordis.yml')
+const approvalLiveConfig = join(testsDir, '..', 'approval.cordis.yml')
+const approvalReplayConfig = join(testsDir, '..', 'approval.snapshot.cordis.yml')
 const runtimeBin = fileURLToPath(new URL('../../../packages/examples/jsonrpc-demo/src/bin.ts', import.meta.url))
 const repoTsconfig = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
 
@@ -81,6 +83,16 @@ interface SdkScenario {
    * only — the deterministic window depends on the scripted tool call.
    */
   steer?: { steerPrompt: string }
+  /**
+   * Authored approval flow over the approval composition: a PreToolUse hook
+   * turns the scripted bash call into an `ask`, the server forwards it to this
+   * client as `approval/request`, and the handler answers {@link answer}. The
+   * decided outcome and the tool result are pinned by the session fixture.
+   * Replay/refresh only — the fixture is hand-authored.
+   */
+  approval?: { answer: 'allowed-once' | 'rejected' }
+  /** Cwd-relative files written into the runtime workspace before launch. */
+  workspaceFiles?: Readonly<Record<string, string>>
   /** Optional scenario-specific live and replay compositions. */
   configs?: { live: string; replay: string }
   /** Environment overrides passed to the runtime subprocess. */
@@ -161,6 +173,37 @@ const SCENARIOS: SdkScenario[] = [
     sessionId: 'sdk-snapshot-steer',
     children: 0,
     steer: { steerPrompt: 'Steered course: reply with exactly Steered answer.' },
+  },
+  {
+    // Keyless authored scenario (like the ACP `hook-cc-pretool-ask`): the
+    // scripted step 1 calls bash, a PreToolUse hook answers `ask`, and the
+    // wire client approves — the granted call runs and the audit pair lands.
+    name: 'approval',
+    prompt: 'Run this exact command with your bash tool: echo approval-proof-1357',
+    sessionId: 'sdk-snapshot-approval',
+    children: 0,
+    approval: { answer: 'allowed-once' },
+    configs: {
+      live: approvalLiveConfig,
+      replay: approvalReplayConfig,
+    },
+    workspaceFiles: {
+      'hooks.json': JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'echo \'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"bash requires manual approval in this session"}}\'',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    },
   },
 ]
 
@@ -479,16 +522,56 @@ async function runSteerDrive(
   }
 }
 
+/**
+ * Drive the approval flow: one prompt whose scripted bash call a PreToolUse
+ * hook turns into an `ask`; the installed approval handler answers the
+ * scenario's decision and the drive settles on the trailing idle status.
+ */
+async function runApprovalDrive(
+  harness: DeepSeekHarness,
+  scenario: SdkScenario,
+): Promise<{ result: RunResult; notifications: HarnessNotification[] }> {
+  await harness.start()
+  const client = harness.client
+  const notifications: HarnessNotification[] = []
+  const events: RunResult['events'] = []
+  const subscription = client.subscribeSessionTree(scenario.sessionId)
+  try {
+    await client.prompt(scenario.sessionId, [{ type: 'text', text: scenario.prompt }])
+    while (true) {
+      const notification = await subscription.next()
+      notifications.push(notification)
+      if (notification.method === 'session.event') {
+        events.push(notification.params.event as RunResult['events'][number])
+      }
+      if (notification.method === 'session.status'
+        && notification.params.sessionId === scenario.sessionId
+        && notification.params.status === 'idle') break
+    }
+  } finally {
+    subscription.close()
+  }
+  return {
+    result: { sessionId: scenario.sessionId, finalResponse: lastAssistantText(events), events, notifications },
+    notifications,
+  }
+}
+
 /** One SDK scenario against a fresh runtime subprocess in an isolated cwd. */
 async function runScenario(scenario: SdkScenario): Promise<{
   result: RunResult
   notifications: HarnessNotification[]
   logs: PersistedLog[]
+  approvalAsks: unknown[]
   observedFiles: Record<string, string | MissingFile>
   cwd: string
 }> {
   const cwd = await mkdtemp(join(tmpdir(), `sdk-snapshot-${scenario.name}-`))
   const sessionsRoot = join(cwd, '.sessions')
+  await Promise.all(Object.entries(scenario.workspaceFiles ?? {}).map(async ([path, content]) => {
+    await mkdir(dirname(join(cwd, path)), { recursive: true })
+    await writeFile(join(cwd, path), content)
+  }))
   const hydrated: HydratedFixtures = recording ? { files: [] } : await hydrateReplayFixtures(scenario, cwd)
   const launch = resolveExampleLaunch({
     srcBin: runtimeBin,
@@ -514,6 +597,8 @@ async function runScenario(scenario: SdkScenario): Promise<{
     ...scenario.environment,
   }
 
+  const approvalAnswer = scenario.approval?.answer
+  const approvalAsks: unknown[] = []
   const harness = new DeepSeekHarness({
     launch: {
       command: launch.command,
@@ -525,13 +610,21 @@ async function runScenario(scenario: SdkScenario): Promise<{
     cwd,
     provider: 'deepseek-official',
     model: 'deepseek-v4-flash',
+    ...approvalAnswer === undefined ? {} : {
+      onApproval: async (request) => {
+        approvalAsks.push({ ...request })
+        return { outcome: approvalAnswer }
+      },
+    },
   })
   try {
     const { result, notifications } = scenario.interrupt !== undefined
       ? await runInterruptDrive(harness, scenario, scenario.interrupt, cwd)
       : scenario.steer !== undefined
         ? await runSteerDrive(harness, scenario, scenario.steer)
-        : await runPromptDrive(harness, scenario, cwd)
+        : scenario.approval !== undefined
+          ? await runApprovalDrive(harness, scenario)
+          : await runPromptDrive(harness, scenario, cwd)
     await harness.close()
     const logs = await persistedLogs(sessionsRoot)
     const observedFiles = Object.fromEntries(await Promise.all(
@@ -540,7 +633,7 @@ async function runScenario(scenario: SdkScenario): Promise<{
         await readExpectedFile(join(cwd, path)),
       ]),
     ))
-    return { result, notifications, logs, observedFiles, cwd }
+    return { result, notifications, logs, observedFiles, cwd, approvalAsks }
   } finally {
     await harness.close()
     await rm(cwd, { recursive: true, force: true })
@@ -568,14 +661,23 @@ function fixtureFiles(scenario: SdkScenario): string[] {
 describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
   for (const scenario of SCENARIOS) {
     it(`replays ${scenario.name} through the SDK`, async () => {
-      if (recording && (scenario.interrupt !== undefined || scenario.steer !== undefined)) {
+      if (recording && (scenario.interrupt !== undefined || scenario.steer !== undefined || scenario.approval !== undefined)) {
         throw new Error(`${scenario.name} is authored against the replay script; a live hang/tool window is not recordable`)
       }
       const scenarioDir = join(snapshotsDir, scenario.name)
       const notificationsExpectedPath = join(scenarioDir, 'notifications.expected.jsonl')
       const resultExpectedPath = join(scenarioDir, 'result.expected.json')
 
-      const { result, notifications, logs, observedFiles, cwd } = await runScenario(scenario)
+      const { result, notifications, logs, observedFiles, cwd, approvalAsks } = await runScenario(scenario)
+      if (scenario.approval !== undefined) {
+        // Wire-shape invariant: the client's handler saw exactly the audit
+        // facts the server forwarded.
+        expect(approvalAsks).toEqual([expect.objectContaining({
+          sessionId: scenario.sessionId,
+          toolName: 'bash',
+          reason: 'bash requires manual approval in this session',
+        })])
+      }
       const ordered = orderLogs(logs, scenario)
       const actualContext = contextOf(ordered, cwd)
       const files = fixtureFiles(scenario)

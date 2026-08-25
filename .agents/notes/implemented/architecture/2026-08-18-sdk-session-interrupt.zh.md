@@ -42,4 +42,4 @@ TypeScript 客户端在协议层增加 `HarnessClient.interrupt(sessionId, optio
 
 - 停放队列语义(被保留的工作等待唤醒 prompt,而非自行恢复)可能让期待 Web 式立即继续的客户端意外;wire 文档与两份快照都明确陈述了它,而改变它将是 agent-loop 的决策,不是 SDK 的。
 - 在 Python SDK 获得自己的 interrupt 之前,两个 SDK 在一个协议方法上存在分歧;该差距记录在 README 中,以免 Python 用户对缺失的方法感到意外。
-- 审批请求与 `turn/steer` 仍是另外两个交互缺口;本设计既不解决也不阻碍它们——未来的 steer 请求会经由相同的按会话记录与相同的接受回执形状路由。
+- 本决定落地时审批请求与 `turn/steer` 是另外两个交互缺口;[`session/steer`](2026-08-19-sdk-session-steer.md) 与 [`approval/request`](2026-08-19-sdk-approval-request.md) 随后都经由相同的按会话记录闭合了它们。

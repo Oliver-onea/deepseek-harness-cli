@@ -19,7 +19,9 @@ export {
 } from './client.ts'
 export type { NotificationSubscription } from './client.ts'
 export { JsonRpcResponseError } from '@deepseek-ai/dsh-sdk-protocol'
+export type { ApprovalRequestParams, ApprovalRequestResult } from '@deepseek-ai/dsh-sdk-protocol'
 export type {
+  ApprovalRequestHandler,
   ContentBlock,
   DeepSeekHarnessOptions,
   HarnessClientOptions,

@@ -28,6 +28,10 @@ The surrounding runtime also loads JSONL session persistence and automatic conte
 
 Pass the config path through the Python SDK's `cordis` option or `DSH_CORDIS_CONFIG`. The bundled executable already carries every plugin named by this file; the target machine does not need Node.js.
 
+## Approval variant
+
+[`approval.cordis.yml`](approval.cordis.yml) adds the approval service and the Claude Code `PreToolUse` hook bridge over this composition: a hook's `ask` decision routes a bash call through `ctx.approval`, and the SDK server forwards the question to the wire client as `approval/request`. `hooks.json` under `DSH_CWD` supplies the hook. [`approval.snapshot.cordis.yml`](approval.snapshot.cordis.yml) is its keyless replay counterpart; its patch ids resolve against the directly included tree, so it repeats the insertions instead of nesting behind `approval.cordis.yml`.
+
 ## Minimal variant
 
 [`minimal.cordis.yml`](minimal.cordis.yml) is the complete standalone counterpart of the Web `minimal` preset. `DSH_SYSTEM_PROMPT` selects its system prompt, with `You are a helpful software engineer assistant.` as the fallback. It suppresses every system-prompt runtime-context contribution for fresh sessions and mounts no context-compaction plugin. Its model-facing tools are exactly:
