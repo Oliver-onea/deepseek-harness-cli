@@ -1,37 +1,27 @@
----
-title: TUI visual richness pass
-status: proposed
-author: agent
-created: 2026-08-26
----
+# Agent Note: TUI visual richness pass
 
-# TUI visual richness pass
+Status: proposed
 
 English | [中文](2026-08-26-tui-visual-pass.zh.md)
 
-This note proposes and documents visual improvements to the terminal UI, based on a survey of other terminal agents (`claude`, `kimi`, `qwen`).
-
-## Motivation
+## Problem
 The terminal UI felt crude (不夠圓潤，感覺很粗糙) and lacked distinct coloring for various markdown and structural elements compared to other products in the space. The initial palette overloaded several semantic roles into the same few hues and omitted background colors entirely.
 
-## Palette Survey Findings
+## Proposal
+Based on a survey of other terminal agents (`claude`, `kimi`, `qwen`), we propose visual improvements to the terminal UI:
+1. **Split the duplicate pairs**: Increased the distinct hue count from 6 to 11. Added Fuchsia (`0xd9, 0x46, 0xef`) for `tool` distinct from `accent` blue. Since diff colors are semantically identical to `success` and `error`, the `added` and `removed` roles were deleted and replaced with `success` and `error` respectively.
+2. **Syntax Highlighting**: Added a lightweight RegEx-based `highlightCode` function using `pi-tui`'s `MarkdownTheme` support, supporting TS/JS, JSON, shell, markdown, and diff without heavyweight dependencies.
+3. **Markdown Elements**: `heading`, `quote`, `link`, `italic`, and `strikethrough` received distinct colors and styles (SGR).
+4. **Diff Background Tinting**: Rejected. The survey confirmed that reference products do not use background tinting for diff lines.
+5. **Rounded Corners**: Changed the square `└` elbow in `tool-card.ts` to `╰`.
 
-| Product | Distinct Foregrounds | Distinct Backgrounds | Attributes Used | Notes |
-|---------|---------------------|----------------------|-----------------|-------|
-| **claude** | 5 (truecolor) | 1 (truecolor) | bold, dim | Heavily utilizes distinct background for its header. |
-| **kimi** | 5 (truecolor) | 0 | bold | Clean layout, colored file paths and instructions. |
-| **qwen** | 4 (truecolor) | 1 (truecolor) | bold | Uses distinct background behind text on the prompt line. |
-| **codex** | 0 (no truecolor) | 0 | bold, dim | Minimal styling. |
-| **agy** | 0 (no truecolor) | 0 | none | Minimal styling. |
-| **opencode**| 0 (no truecolor) | 0 | none | Minimal styling. |
-| **dsh** (old) | 6 (truecolor) | 0 | bold, dim, reverse | Duplicate hues used for multiple roles. |
+## Acceptance criteria
+- All tests in `packages/ui/tui` pass.
+- New roles are defined and distinctly styled across 16-color, 256-color, and truecolor depths.
+- A lightweight RegExp syntax highlighter works without pulling large dependencies.
 
-### Gap List
-1. **Backgrounds**: Both `claude` and `qwen` use colored backgrounds for structural regions. We used none.
-2. **Duplicate Pairs**: We overloaded the same color for `tool`/`accent`, `success`/`added`, and `error`/`removed`.
-3. **Markdown Elements**: Headings, links, and quotes lacked distinct treatment.
-4. **Code Syntax Highlighting**: Reference products highlight syntax tokens; we used a flat color for all code.
+## Risks
+The regex-based highlighter may mis-highlight complex edge cases, but it provides a "good enough" approximation that vastly improves the perceived richness of the UI.
 
 ## Alternatives considered
-1. **Adding a heavyweight syntax highlighter**: Ruled out if it adds too much bundle size and startup time. We should only use token-level styling if the vendored `pi-tui` supports it natively.
-2. **Copying other palettes exactly**: Ruled out as we want to maintain our own brand identity while reaching parity in richness.
+None.

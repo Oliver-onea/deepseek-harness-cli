@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-26-tui-visual-pass.md
-2026-08-26-tui-visual-pass.md: 1f670f63b17e4c2ef91375952e970fa44b5683cc
-2026-08-26-tui-visual-pass.zh.md: 785f46c514bb3e9407bafce7a655124743affbc3
+2026-08-26-tui-visual-pass.md: f6193cd13cdf1e3049b18b12d9eaa7f5fdfdfdd1
+2026-08-26-tui-visual-pass.zh.md: 5b229f5dd71c20d716d77f18a17f1ba7b4ee52f6

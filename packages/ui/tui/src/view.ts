@@ -10,6 +10,7 @@ import { Markdown, wrapTextWithAnsi, type Component, type MarkdownTheme } from '
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { renderToolCard, type CardLayout } from './tool-card.ts'
 import type { Palette } from './theme.ts'
+import { highlightCode } from './highlight.ts'
 import type { ToolEntry, ToolOutcome, Transcript, TranscriptEntry } from './transcript.ts'
 
 /** The tool-presentation lookups the view needs, supplied by the plugin. */
@@ -52,27 +53,27 @@ interface CachedLines {
 }
 
 /**
- * Build the Markdown theme from the palette, so assistant prose follows the
- * same 16-color, terminal-default styling as everything else.
- * @param palette - the styles to derive from.
- * @returns the pi-tui Markdown theme.
+ * Map the TUI palette to the markdown component's theme.
+ * @param palette - the component's palette.
+ * @returns the markdown theme.
  */
 function markdownTheme(palette: Palette): MarkdownTheme {
   return {
-    heading: palette.bold,
-    link: palette.tool,
+    heading: palette.heading,
+    link: palette.link,
     linkUrl: palette.dim,
     code: palette.code,
     codeBlock: palette.code,
     codeBlockBorder: palette.dim,
-    quote: palette.dim,
+    quote: palette.quote,
     quoteBorder: palette.dim,
     hr: palette.dim,
     listBullet: palette.tool,
     bold: palette.bold,
-    italic: palette.dim,
-    strikethrough: palette.dim,
+    italic: palette.italic,
+    strikethrough: palette.strikethrough,
     underline: palette.bold,
+    highlightCode: (code, lang) => highlightCode(code, lang, palette),
   }
 }
 

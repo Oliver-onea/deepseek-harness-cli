@@ -30,7 +30,7 @@ describe('renderToolCard', () => {
     const call: ToolCallView = { card: 'generic', title: 'Running' }
     const result: ToolResultView = { card: 'generic', title: 'Listed 3 files' }
     const lines = renderToolCard(card({ call, result, outcome: textOutcome('a\nb\nc') }), palette, layout)
-    expect(lines).toEqual(['✓ Running', '└ Listed 3 files', '  a', '  b', '  c'])
+    expect(lines).toEqual(['✓ Running', '╰ Listed 3 files', '  a', '  b', '  c'])
   })
 
   it('colors the elbow line for a failed result', () => {
@@ -38,8 +38,8 @@ describe('renderToolCard', () => {
     const call: ToolCallView = { card: 'generic', title: 'Running' }
     const result: ToolResultView = { card: 'generic', title: 'exit code 1' }
     const lines = renderToolCard(card({ call, result, outcome: textOutcome('boom', true) }), colored, layout)
-    expect(lines[0]).toBe('\x1b[38;2;248;81;73m✗\x1b[39m \x1b[38;2;77;107;254mRunning\x1b[39m')
-    expect(lines[1]).toBe(`└ ${colored.error('exit code 1')}`)
+    expect(lines[0]).toBe('\x1b[38;2;248;81;73m✗\x1b[39m \x1b[38;2;217;70;239mRunning\x1b[39m')
+    expect(lines[1]).toBe(`╰ ${colored.error('exit code 1')}`)
   })
 
   it('drops the elbow when the result title repeats the call title', () => {

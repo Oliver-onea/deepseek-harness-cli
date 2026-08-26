@@ -44,7 +44,7 @@ const SUCCEEDED = '✓'
 const FAILED = '✗'
 
 /** Glyph attaching a settled result to its call line. */
-const ELBOW = '└'
+const ELBOW = '╰'
 
 /** Argument fields a card header names, most identifying first. */
 const SHORT_ARG_KEYS = ['command', 'file_path', 'pattern', 'path', 'query', 'url', 'objective'] as const
@@ -180,9 +180,9 @@ function diffLines(
   for (const diff of diffs) {
     lines.push(palette.dim(displayLine(diff.path)))
     if (diff.oldText !== null) {
-      for (const line of bodyLines(displayText(diff.oldText))) lines.push(palette.removed(`- ${line}`))
+      for (const line of bodyLines(displayText(diff.oldText))) lines.push(palette.error(`- ${line}`))
     }
-    for (const line of bodyLines(displayText(diff.newText))) lines.push(palette.added(`+ ${line}`))
+    for (const line of bodyLines(displayText(diff.newText))) lines.push(palette.success(`+ ${line}`))
   }
   return lines
 }

@@ -107,7 +107,7 @@ describe('TranscriptView', () => {
     })
     const lines = view.render(40)
     expect(lines[0]).toBe('✓ Run ls')
-    expect(lines[1]).toBe('└ Ran ls')
+    expect(lines[1]).toBe('╰ Ran ls')
   })
 
   it('leaves a running card without a result lookup', () => {

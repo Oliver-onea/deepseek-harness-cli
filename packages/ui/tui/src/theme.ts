@@ -30,6 +30,10 @@ export interface Palette {
   dim: Style
   /** Emphasis inside otherwise plain text. */
   bold: Style
+  /** Italic text. */
+  italic: Style
+  /** Strikethrough text. */
+  strikethrough: Style
   /** The human's own turns. */
   user: Style
   /** Tool-call headers and other structural labels. */
@@ -42,12 +46,20 @@ export interface Palette {
   warn: Style
   /** Failures. */
   error: Style
-  /** Removed lines in a diff. */
-  removed: Style
-  /** Added lines in a diff. */
-  added: Style
   /** Fenced-code bodies. */
   code: Style
+  /** Syntax string tokens. */
+  codeString: Style
+  /** Syntax keyword tokens. */
+  codeKeyword: Style
+  /** Syntax comment tokens. */
+  codeComment: Style
+  /** Headings. */
+  heading: Style
+  /** Links. */
+  link: Style
+  /** Quotes. */
+  quote: Style
   /** The current row of a keyboard selector. */
   selected: Style
 }
@@ -94,15 +106,21 @@ const TIERS: Record<ColorDepth, Palette> = {
   truecolor: {
     dim: sgr('2', '22'),
     bold: sgr('1', '22'),
+    italic: sgr('3', '23'),
+    strikethrough: sgr('9', '29'),
     user: rgb(0x56, 0xc8, 0xe8),
-    tool: rgb(0x4d, 0x6b, 0xfe),
+    tool: rgb(0xd9, 0x46, 0xef), // fuchsia-500
     accent: rgb(0x4d, 0x6b, 0xfe),
     success: rgb(0x3f, 0xb9, 0x50),
     warn: rgb(0xe0, 0xaf, 0x68),
     error: rgb(0xf8, 0x51, 0x49),
-    removed: rgb(0xf8, 0x51, 0x49),
-    added: rgb(0x3f, 0xb9, 0x50),
     code: rgb(0xa7, 0x8b, 0xfa),
+    codeString: rgb(0x86, 0xef, 0xac), // green-300
+    codeKeyword: rgb(0xf4, 0x72, 0xb6), // pink-400
+    codeComment: rgb(0x9c, 0xa3, 0xaf), // gray-400
+    heading: rgb(0x60, 0xa5, 0xfa), // blue-400
+    link: sgr('38;2;56;189;248;4', '39;24'), // sky-400 + underline
+    quote: rgb(0x14, 0xb8, 0xa6), // teal-500
     // Reverse video rather than a background color: it inverts whatever the
     // host terminal already uses, so selection stays legible in both themes.
     selected: sgr('7', '27'),
@@ -110,29 +128,41 @@ const TIERS: Record<ColorDepth, Palette> = {
   '256': {
     dim: sgr('2', '22'),
     bold: sgr('1', '22'),
+    italic: sgr('3', '23'),
+    strikethrough: sgr('9', '29'),
     user: indexed(81),
-    tool: indexed(69),
+    tool: indexed(171), // magenta
     accent: indexed(69),
     success: indexed(71),
     warn: indexed(178),
     error: indexed(203),
-    removed: indexed(203),
-    added: indexed(71),
     code: indexed(147),
+    codeString: indexed(114),
+    codeKeyword: indexed(205),
+    codeComment: indexed(247),
+    heading: indexed(75),
+    link: sgr('38;5;81;4', '39;24'),
+    quote: indexed(37),
     selected: sgr('7', '27'),
   },
   '16': {
     dim: sgr('2', '22'),
     bold: sgr('1', '22'),
+    italic: sgr('3', '23'),
+    strikethrough: sgr('9', '29'),
     user: sgr('36', '39'),
-    tool: sgr('34', '39'),
+    tool: sgr('35', '39'),
     accent: sgr('34', '39'),
     success: sgr('32', '39'),
     warn: sgr('33', '39'),
     error: sgr('31', '39'),
-    removed: sgr('31', '39'),
-    added: sgr('32', '39'),
     code: sgr('35', '39'),
+    codeString: sgr('32', '39'),
+    codeKeyword: sgr('35', '39'),
+    codeComment: sgr('37', '39'),
+    heading: sgr('34', '39'),
+    link: sgr('36;4', '39;24'),
+    quote: sgr('36', '39'),
     selected: sgr('7', '27'),
   },
 }
@@ -161,9 +191,11 @@ export function detectColorDepth(env: ColorEnvironment): ColorDepth {
 export function createPalette(color: boolean, depth: ColorDepth = '16'): Palette {
   if (!color) {
     return {
-      dim: PLAIN, bold: PLAIN, user: PLAIN, tool: PLAIN, accent: PLAIN,
-      success: PLAIN, warn: PLAIN, error: PLAIN, removed: PLAIN, added: PLAIN,
-      code: PLAIN, selected: PLAIN,
+      dim: PLAIN, bold: PLAIN, italic: PLAIN, strikethrough: PLAIN,
+      user: PLAIN, tool: PLAIN, accent: PLAIN, success: PLAIN, warn: PLAIN,
+      error: PLAIN, code: PLAIN, codeString: PLAIN, codeKeyword: PLAIN,
+      codeComment: PLAIN, heading: PLAIN, link: PLAIN, quote: PLAIN,
+      selected: PLAIN,
     }
   }
   return { ...TIERS[depth] }
