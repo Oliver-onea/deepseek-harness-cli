@@ -15,6 +15,7 @@ The shipped composition is [`dsh-tui-app`](../../bundle/tui-app/README.md), the 
 | `session` | required | The exact `SessionId` of the agent this terminal drives, as the host created it. |
 | `agentWaitTimeoutMs` | `30000` | Maximum time to wait for that agent before refusing startup on the ordinary terminal. |
 | `color` | `true` | Whether to emit SGR sequences; `false` renders the same layout unstyled. |
+| `colorDepth` | `auto` | The color depth to draw at: `auto` reads the terminal's advertised capability, and `truecolor`, `256`, `16`, or `none` pin one rung of the degradation ladder. Ignored when `color` is `false`. |
 | `headLines` | `8` | Lines kept at the head of a folded tool-card body. |
 | `tailLines` | `4` | Lines kept at the tail of a folded tool-card body. |
 | `showReasoning` | `false` | Whether reasoning starts visible; a terminal control toggles it either way. |
@@ -47,7 +48,7 @@ A picked route validates through its adapter and takes effect at the next prompt
 
 Every string reaching pi-tui or the pane title passes through `displayText()`, which collapses carriage returns, expands tabs, and renders every other C0/DEL/C1 control as a visible `\xNN` escape. Only this package and pi-tui create ANSI control sequences, so untrusted tool output or model text cannot repaint the screen, move the cursor, or set the pane title.
 
-The palette uses standard 16-color ANSI foregrounds and SGR attributes and keeps body text and backgrounds at terminal defaults, so a host terminal's light or dark theme remaps the whole interface; selection uses reverse video. There is no TUI-specific theme setting.
+The palette is role-keyed and draws at the deepest color depth the deployment supports: truecolor when `COLORTERM` advertises it, else 256-color when `TERM` names it, else the 16-color ANSI set, else no color; `colorDepth` pins one rung. Every rung keeps the roles' meanings — a failure reads as the error color at all of them — and keeps body text and backgrounds at terminal defaults, so a host terminal's light or dark theme remaps the interface; selection uses reverse video at every rung. There is no TUI-specific theme setting ([rationale](../../../.agents/notes/proposed/architecture/2026-08-26-tui-color-depth-ladder.md)).
 
 ## Controls
 

@@ -113,6 +113,7 @@ describe('resolveTerminalConfig', () => {
     expect(tui.resolveTerminalConfig({ session: SESSION }))
       .toEqual({
         color: true,
+        colorDepth: 'auto',
         headLines: 8,
         tailLines: 4,
         showReasoning: false,
@@ -123,10 +124,10 @@ describe('resolveTerminalConfig', () => {
 
   it('keeps every stated setting', () => {
     expect(tui.resolveTerminalConfig({
-      session: SESSION, color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+      session: SESSION, color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
       maxSuggestions: 3,
     })).toEqual({
-      color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+      color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
       maxSuggestions: 3,
     })
   })
