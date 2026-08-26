@@ -110,6 +110,12 @@ function assertNever(entry: never): never {
   throw new Error(`dsh-tui: unhandled transcript entry ${JSON.stringify(entry)}`)
 }
 
+/** The marker prefixing the assistant's first line, rhyming the reader's `›`. */
+const ASSISTANT_MARKER = '◆'
+
+/** Columns the assistant marker and its hanging indent occupy. */
+const MARKER_COLUMNS = 2
+
 /** The transcript, drawn. */
 export class TranscriptView implements Component {
   private readonly cache = new WeakMap<TranscriptEntry, CachedLines>()
@@ -146,11 +152,29 @@ export class TranscriptView implements Component {
    */
   render(width: number): string[] {
     const lines: string[] = []
+    let previous: TranscriptEntry | undefined
     for (const entry of this.transcript.entries) {
       if (entry.kind === 'reasoning' && !this.reasoning) continue
+      if (this.turnGap(entry, previous)) lines.push('')
       lines.push(...this.linesFor(entry, width))
+      previous = entry
     }
     return lines
+  }
+
+  /**
+   * Whether one turn begins with an extra blank line before it. Spacing marks
+   * the turn boundary; the editor frame owns the only horizontal rules.
+   * @param entry - the entry about to draw.
+   * @param previous - the entry drawn before it, when any.
+   * @returns whether to open a blank line before this entry.
+   */
+  private turnGap(entry: TranscriptEntry, previous: TranscriptEntry | undefined): boolean {
+    if (entry.kind !== 'user' && entry.kind !== 'assistant') return false
+    // The first entry on screen and the entry after the cold-open header keep
+    // the single separator they already have.
+    if (previous === undefined || previous.kind === 'header') return false
+    return true
   }
 
   /**
@@ -190,8 +214,7 @@ export class TranscriptView implements Component {
       case 'user':
         return wrap(entry.text, width).map(line => `${palette.user('›')} ${line}`)
       case 'assistant':
-        this.markdown.setText(entry.text)
-        return this.markdown.render(width)
+        return this.drawAssistant(entry.text, width)
       case 'reasoning':
         return wrap(entry.text, width).map(line => palette.dim(line))
       case 'notice':
@@ -204,6 +227,23 @@ export class TranscriptView implements Component {
       default:
         return assertNever(entry)
     }
+  }
+
+  /**
+   * Draw one assistant turn: the marker colors the first line so turn
+   * ownership is scannable, and the rest of the turn hangs under it.
+   * @param text - the assistant text, already normalized.
+   * @param width - the viewport width in columns.
+   * @returns the turn's lines.
+   */
+  private drawAssistant(text: string, width: number): string[] {
+    this.markdown.setText(text)
+    const body = this.markdown.render(Math.max(1, width - MARKER_COLUMNS))
+    if (body.length === 0) return body
+    const palette = this.options.palette
+    return body.map((line, index) => index === 0
+      ? `${palette.accent(ASSISTANT_MARKER)} ${line}`
+      : `${' '.repeat(MARKER_COLUMNS)}${line}`)
   }
 
   /**
