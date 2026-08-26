@@ -1,8 +1,10 @@
 /**
  * Tool cards: the terminal projection of a tool's own render intent. Every
- * shape here comes from `presentCall`/`presentResult`, so a tool changes how it
- * reads in the terminal by changing its presenter, never by adding a branch to
- * this renderer.
+ * shape here comes from `presentCall`/`presentResult`, so a tool changes how
+ * it reads in the terminal by changing its presenter, never by adding a
+ * branch to this renderer. A card opens with the call line and, once settled,
+ * attaches the result beneath it on an elbow with a dimmed body — no border
+ * surrounds the card.
  * @module @deepseek-ai/dsh-tui/tool-card
  */
 
@@ -16,6 +18,8 @@ import type { ToolOutcome } from './transcript.ts'
 export interface ToolCard {
   /** The registered tool name, the fallback title when the tool presents none. */
   name: string
+  /** The raw arguments JSON exactly as the model produced it. */
+  rawArguments: string
   /** The tool's pending-call view, when it declared one. */
   call: ToolCallView | undefined
   /** The tool's completed view, when it declared one. */
@@ -38,6 +42,45 @@ export interface CardLayout {
 const RUNNING = '·'
 const SUCCEEDED = '✓'
 const FAILED = '✗'
+
+/** Glyph attaching a settled result to its call line. */
+const ELBOW = '└'
+
+/** Argument fields a card header names, most identifying first. */
+const SHORT_ARG_KEYS = ['command', 'file_path', 'pattern', 'path', 'query', 'url', 'objective'] as const
+
+/** Maximum visible length of the argument a card header names. */
+const MAX_SHORT_ARG_LENGTH = 40
+
+/**
+ * Summarize a call's arguments for the header of a tool that presents no
+ * title of its own: one identifying string value, so an MCP or otherwise
+ * unpresented call still reads as `name(args)` rather than a bare name.
+ * @param rawArguments - the raw arguments JSON the model produced.
+ * @returns ` (value)` truncated and sanitized, or `` when nothing identifies.
+ */
+export function shortArgs(rawArguments: string): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    return ''
+  }
+  if (typeof parsed !== 'object' || parsed === null) return ''
+  const record = parsed as Record<string, unknown>
+  let value: unknown
+  for (const key of SHORT_ARG_KEYS) {
+    if (typeof record[key] === 'string') {
+      value = record[key]
+      break
+    }
+  }
+  if (value === undefined) value = Object.values(record).find(candidate => typeof candidate === 'string')
+  if (typeof value !== 'string' || value === '') return ''
+  const line = displayLine(value)
+  const short = line.length > MAX_SHORT_ARG_LENGTH ? `${line.slice(0, MAX_SHORT_ARG_LENGTH)}…` : line
+  return ` (${short})`
+}
 
 /**
  * Join a view's content blocks into terminal text.
@@ -85,16 +128,31 @@ function fold(lines: readonly string[], layout: CardLayout, palette: Palette): s
 }
 
 /**
- * The title a card shows: the completed view's replacement, else the pending
- * view's, else the tool's registered name.
+ * The call line's title: the pending view's own title, else the registered
+ * name with one identifying argument, so an unpresented call still reads as
+ * `name(args)`.
  * @param card - the card's views and identity.
- * @returns the single-line title.
+ * @returns the single-line call title.
  */
-function title(card: ToolCard): string {
-  const replacement = card.result === undefined ? undefined : card.result.title
-  if (replacement !== undefined) return displayLine(replacement)
-  if (card.call !== undefined) return displayLine(card.call.title)
-  return card.name
+function callTitle(card: ToolCard): string {
+  if (card.call !== undefined && card.call.title !== undefined) return displayLine(card.call.title)
+  return `${card.name}${shortArgs(card.rawArguments)}`
+}
+
+/**
+ * The settled result's title for the elbow line, when it names something the
+ * call line does not already say.
+ * @param card - the card's views.
+ * @returns the result title, or `undefined` when it adds nothing.
+ */
+function elbowTitle(card: ToolCard): string | undefined {
+  const title = card.result?.title
+  if (title === undefined) return undefined
+  const line = displayLine(title)
+  if (card.call !== undefined && card.call.title !== undefined && line === displayLine(card.call.title)) {
+    return undefined
+  }
+  return line
 }
 
 /**
@@ -188,16 +246,28 @@ function callBody(call: ToolCallView, palette: Palette): string[] {
 }
 
 /**
- * Render one tool card.
+ * Render one tool card: the call line, then — once the call settles — the
+ * result attached with an elbow so it reads as belonging to its call without
+ * a box around either. A settled result keeps the call's line as the header
+ * and names the result beneath it; an error colors the elbow line.
  * @param card - the call, its views, and its outcome.
  * @param palette - the styles to draw with.
  * @param layout - the reader's current fold settings.
  * @returns the card's lines, header first.
  */
 export function renderToolCard(card: ToolCard, palette: Palette, layout: CardLayout): string[] {
-  const header = `${glyph(card, palette)} ${palette.tool(title(card))}`
-  const body = card.outcome === undefined
-    ? (card.call === undefined ? [] : callBody(card.call, palette))
-    : resultBody(card, palette)
-  return [header, ...fold(body, layout, palette).map(line => `  ${line}`)]
+  const header = `${glyph(card, palette)} ${palette.tool(callTitle(card))}`
+  if (card.outcome === undefined) {
+    const body = card.call === undefined ? [] : callBody(card.call, palette)
+    return [header, ...fold(body, layout, palette).map(line => `  ${line}`)]
+  }
+  const lines = [header]
+  const elbow = elbowTitle(card)
+  if (elbow !== undefined) {
+    const style = card.outcome.isError ? palette.error : palette.dim
+    lines.push(`${ELBOW} ${style(elbow)}`)
+  }
+  const body = resultBody(card, palette).map(line => palette.dim(line))
+  lines.push(...fold(body, layout, palette).map(line => `  ${line}`))
+  return lines
 }

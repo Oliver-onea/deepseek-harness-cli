@@ -105,7 +105,9 @@ describe('TranscriptView', () => {
       presentCall: () => ({ card: 'generic', title: 'Run ls' }),
       presentResult: () => ({ card: 'generic', title: 'Ran ls' }),
     })
-    expect(view.render(40)[0]).toBe('✓ Ran ls')
+    const lines = view.render(40)
+    expect(lines[0]).toBe('✓ Run ls')
+    expect(lines[1]).toBe('└ Ran ls')
   })
 
   it('leaves a running card without a result lookup', () => {

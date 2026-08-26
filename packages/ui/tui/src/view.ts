@@ -257,6 +257,7 @@ export class TranscriptView implements Component {
     const outcome = entry.outcome
     const card = {
       name: entry.name,
+      rawArguments: entry.rawArguments,
       call: presenter.presentCall(entry.name, entry.rawArguments),
       result: outcome === undefined
         ? undefined
