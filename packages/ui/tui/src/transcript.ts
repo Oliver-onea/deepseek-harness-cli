@@ -68,8 +68,15 @@ export interface NoticeEntry {
   text: string
 }
 
+/** The cold-open header seeded at startup; it scrolls away with the transcript. */
+export interface HeaderEntry {
+  kind: 'header'
+  /** The composed, styled header lines. */
+  lines: readonly string[]
+}
+
 /** One drawable unit of the conversation, in append order. */
-export type TranscriptEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry
+export type TranscriptEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | HeaderEntry
 
 /**
  * Join a message's text blocks. Reasoning is excluded: it has its own entry,
@@ -144,6 +151,16 @@ export class Transcript {
    */
   notice(tone: NoticeTone, text: string): void {
     this.items.push({ kind: 'notice', tone, text: displayText(text) })
+  }
+
+  /**
+   * Seed the cold-open header once, and only while nothing else has been
+   * drawn: a resumed transcript keeps its own first entry.
+   * @param lines - the composed header lines.
+   */
+  seedHeader(lines: readonly string[]): void {
+    if (this.items.length > 0) return
+    this.items.push({ kind: 'header', lines })
   }
 
   /**

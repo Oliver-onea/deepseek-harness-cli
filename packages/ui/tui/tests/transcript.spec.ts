@@ -223,4 +223,17 @@ describe('Transcript', () => {
     feed(userPrompt(session, 'run\x1b[2J'))
     expect((transcript.entries[0] as UserEntry).text).toBe('run\\x1b[2J')
   })
+
+  it('seeds the cold-open header only while the transcript is empty', () => {
+    const { session, transcript, feed } = log()
+    transcript.seedHeader(['whale', 'name'])
+    expect(transcript.entries.map(entry => entry.kind)).toEqual(['header'])
+    // A resumed transcript already carries entries, so the header stays out.
+    transcript.seedHeader(['again'])
+    expect(transcript.entries).toHaveLength(1)
+    feed(userPrompt(session, 'hello'))
+    expect(transcript.entries.map(entry => entry.kind)).toEqual(['header', 'user'])
+    transcript.seedHeader(['late'])
+    expect(transcript.entries).toHaveLength(2)
+  })
 })

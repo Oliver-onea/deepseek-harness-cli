@@ -22,10 +22,11 @@ import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { TerminalAutocomplete } from './autocomplete.ts'
 import type { AutocompleteOptions } from './autocomplete.ts'
 import { displayLine } from './display-text.ts'
+import { composeColdOpen } from './header.ts'
 import type { PanelHost } from './questions.ts'
 import { renderStatus } from './status.ts'
 import type { StatusGoal, StatusPlanMode } from './status.ts'
-import type { Palette } from './theme.ts'
+import type { ColorDepth, Palette } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { TranscriptView, type ToolPresenter } from './view.ts'
 
@@ -37,6 +38,8 @@ export interface ShellOptions {
   agent: Agent
   /** The styles to draw with. */
   palette: Palette
+  /** The color depth the palette draws at, if any. */
+  colorDepth?: ColorDepth | undefined
   /** The tool-view lookups the transcript uses. */
   presenter: ToolPresenter
   /** The slash-command registry, when the composition mounts one. */
@@ -156,6 +159,22 @@ export class TerminalShell implements PanelHost {
     ]))
     tui.setFocus(this.editor)
     this.refreshStatus()
+  }
+
+  /**
+   * Seed the cold-open header over an empty transcript; a resumed one keeps
+   * its own first entry.
+   */
+  seedColdOpen(): void {
+    this.transcript.seedHeader(composeColdOpen({
+      provider: this.route.provider,
+      model: this.route.model,
+      permissionPreset: this.options.permissionPreset?.(),
+      cwd: this.options.agent.session.header.cwd ?? process.cwd(),
+      depth: this.options.colorDepth,
+      columns: this.options.tui.terminal.columns,
+      rows: this.options.tui.terminal.rows,
+    }, this.options.palette))
   }
 
   /**

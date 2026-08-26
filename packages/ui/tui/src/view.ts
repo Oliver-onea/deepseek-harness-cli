@@ -91,6 +91,9 @@ function revisionOf(entry: TranscriptEntry): string {
       return `${entry.streaming ? '1' : '0'}${entry.text}`
     case 'tool':
       return `${entry.callId}:${entry.outcome === undefined ? 'run' : String(entry.outcome.isError)}:${entry.outcome?.content.length ?? 0}`
+    case 'header':
+      // The header is immutable once seeded.
+      return 'header'
     // An entry kind this module cannot draw gets a constant fingerprint here
     // and is refused by `drawEntry`, the single guard for the closed union.
     default:
@@ -193,6 +196,8 @@ export class TranscriptView implements Component {
         return wrap(entry.text, width).map(line => palette.dim(line))
       case 'notice':
         return wrap(entry.text, width).map(line => toneOf(entry.tone, palette)(line))
+      case 'header':
+        return entry.lines.flatMap(line => wrap(line, width))
       case 'tool':
         return this.drawTool(entry, width)
       // Closed union over this module's own entry vocabulary.

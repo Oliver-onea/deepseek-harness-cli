@@ -229,6 +229,13 @@ describe('dsh-tui mounting', () => {
     await ctx.plugin(tui, { session: SESSION, color: false })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(screen(terminal)).toContain('resumed question')
+    // A resumed session keeps its own first entry: no cold-open header.
+    expect(screen(terminal)).not.toContain('DeepSeek Harness')
+  })
+
+  it('seeds the cold-open header over an empty session', async () => {
+    const { terminal } = await mount()
+    expect(screen(terminal)).toContain('DeepSeek Harness')
   })
 
   it('follows live appends onto the screen', async () => {

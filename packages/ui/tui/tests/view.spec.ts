@@ -37,6 +37,11 @@ describe('TranscriptView', () => {
     expect(viewOver([{ kind: 'user', text: 'hello' }]).render(40)).toEqual(['› hello', ''])
   })
 
+  it('draws the seeded cold-open header lines as they were composed', () => {
+    const lines = viewOver([{ kind: 'header', lines: ['whale art', 'DeepSeek Harness'] }]).render(40)
+    expect(lines).toEqual(['whale art', 'DeepSeek Harness', ''])
+  })
+
   it('renders assistant text as markdown', () => {
     const lines = viewOver([{ kind: 'assistant', text: '# Title', streaming: false }]).render(40)
     expect(lines.join('\n')).toContain('Title')

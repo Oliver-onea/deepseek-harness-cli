@@ -375,6 +375,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
     tui,
     agent,
     palette,
+    colorDepth: depth,
     presenter: createPresenter(ctx, agent),
     commands,
     tokenMeter: ctx.get('tokenMeter'),
@@ -430,6 +431,10 @@ async function start(ctx: Context, config: Config): Promise<void> {
   // request/context restates the route the session actually used last, so the
   // footer and pane title name it rather than the launch pin.
   for (const event of agent.session.events) shell.observe(event)
+  // Seed the cold-open header only when the replay left nothing to show: a
+  // resumed session keeps its own first entry, and the header scrolls away
+  // with the transcript after the first turn.
+  shell.seedColdOpen()
   shell.refreshStatus()
   syncTitle()
 

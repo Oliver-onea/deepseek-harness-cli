@@ -26,6 +26,8 @@ The plugin waits for the agent carrying `session`, bounded by `agentWaitTimeoutM
 
 ## What it draws
 
+A fresh session opens on a cold-open header seeded as the transcript's first entry, so it scrolls away with the conversation after the first turn and is never redrawn or pinned: the DeepSeek whale mark beside the product name and version, the route, the permission preset, the home-collapsed working directory, and one line of key hints. The mark draws at truecolor or 256-color depth; a terminal narrower than 78 columns stacks it above the identity, and a terminal under 60 columns or too low for the block replaces it with a one-line identity header. A resumed session keeps its own first entry and shows no header.
+
 The transcript is folded from the **append-origin session log**, not from the model-visible surface, so a resumed session keeps every message the reader already saw and a compacted range stays readable behind its marker. It renders human turns, assistant text as Markdown, reasoning (hidden by default), tool cards, and one-line notices for turn endings, settled commands, and compactions. Rendered lines are cached per entry and invalidated by content or width change, so redrawing a long conversation costs only the entries that moved.
 
 Tool cards come from each tool's own `presentCall`/`presentResult` ([render intent](../../core/tools/README.md)): terminal, diff, read, search, and web cards each have a terminal form, and a card shape this renderer does not know falls back to the model-facing result. A tool changes how it reads here by changing its presenter, never by a branch in this package.
