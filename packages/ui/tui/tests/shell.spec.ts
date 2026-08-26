@@ -452,6 +452,33 @@ describe('TerminalShell', () => {
     expect(drawn).not.toContain('workspace-write')
   })
 
+  it('carries the run state on a colored footer indicator', () => {
+    const tui = fakeTui()
+    const agent = fakeAgent()
+    const palette = createPalette(true, 'truecolor')
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette,
+      presenter,
+      commands: undefined,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      defaultRoute: undefined,
+    })
+    shell.start()
+    const idle = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(idle).toContain(`${palette.success('●')} ready`)
+
+    Object.assign(agent, { status: 'running' as const })
+    shell.refreshStatus()
+    const running = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(running).toContain(`${palette.warn('⠋')} working`)
+    shell.stopStatus()
+  })
+
   it('reflects changing goal state without a new session event', () => {
     let goal: { objective: string; phase: string } | undefined = { objective: 'first', phase: 'active' }
     const { shell, tui } = shellFor({ state: { goal: () => goal } })

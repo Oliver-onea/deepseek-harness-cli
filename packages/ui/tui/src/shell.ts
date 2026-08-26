@@ -7,11 +7,12 @@
 
 import {
   Editor,
+  Loader,
   ScrollView,
-  Text,
   VStack,
   matchesKey,
   type Component,
+  type LoaderIndicatorOptions,
   type ViewportTUI,
 } from '@earendil-works/pi-tui'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -75,6 +76,15 @@ export interface ShellOptions {
 /** The editor's placeholder-free border styling. */
 const EDITOR_PADDING_X = 1
 
+/** The footer's spinner frames while a turn runs. */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+/** The footer's spinner cadence in milliseconds. */
+const SPINNER_INTERVAL_MS = 80
+
+/** A style that adds nothing, for footer fields the palette already styled. */
+const IDENTITY_STYLE = (text: string): string => text
+
 /**
  * Route one submitted line: a slash command the registry knows runs as a
  * command, and everything else is conversation.
@@ -98,7 +108,10 @@ export class TerminalShell implements PanelHost {
   private readonly transcript = new Transcript()
   private readonly view: TranscriptView
   private readonly editor: Editor
-  private readonly status = new Text('', EDITOR_PADDING_X, 0)
+  private readonly status: Loader
+  private readonly runningIndicator: LoaderIndicatorOptions
+  private readonly idleIndicator: LoaderIndicatorOptions
+  private statusRunning: boolean | undefined
   private readonly panels = new Set<Component>()
   private turnStartedAt: number | undefined
   private contextWindow: number | undefined
@@ -119,6 +132,14 @@ export class TerminalShell implements PanelHost {
     })
     this.view.reasoning = options.showReasoning
     this.view.layout = { headLines: options.headLines, tailLines: options.tailLines, expanded: false }
+    // The run state rides the indicator — a spinner while a turn runs, a
+    // green dot while idle — so the footer reads the state before the words.
+    this.runningIndicator = {
+      frames: SPINNER_FRAMES.map(frame => options.palette.warn(frame)),
+      intervalMs: SPINNER_INTERVAL_MS,
+    }
+    this.idleIndicator = { frames: [options.palette.success('●')] }
+    this.status = new Loader(options.tui, options.palette.warn, IDENTITY_STYLE, '', this.idleIndicator)
     this.editor = new Editor(options.tui, {
       borderColor: options.palette.dim,
       selectList: {
@@ -199,8 +220,13 @@ export class TerminalShell implements PanelHost {
   refreshStatus(): void {
     const agent = this.options.agent
     const measurement = this.options.tokenMeter?.measure(agent.session)
-    this.status.setText(renderStatus({
-      running: agent.status === 'running',
+    const running = agent.status === 'running'
+    if (this.statusRunning !== running) {
+      this.statusRunning = running
+      this.status.setIndicator(running ? this.runningIndicator : this.idleIndicator)
+    }
+    this.status.setMessage(renderStatus({
+      running,
       provider: this.route.provider,
       model: this.route.model,
       elapsedMs: this.turnStartedAt === undefined ? 0 : Date.now() - this.turnStartedAt,
@@ -213,6 +239,11 @@ export class TerminalShell implements PanelHost {
       permissionPreset: this.options.permissionPreset?.(),
     }, this.options.palette))
     this.options.tui.requestRender()
+  }
+
+  /** Stop the footer's animation; the screen effect calls this on teardown. */
+  stopStatus(): void {
+    this.status.stop()
   }
 
   /**

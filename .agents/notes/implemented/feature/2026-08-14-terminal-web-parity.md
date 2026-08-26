@@ -12,7 +12,7 @@ Seven commands resolve in a shipped terminal session — `/compact`, `/exit`, `/
 
 Typing `/` or `@` does nothing. The web surface detects both under the caret and offers a grouped candidate menu ([`ui-input-trigger`](../../../../packages/client/ui-input-trigger/README.md)), which is how a reader discovers commands, skills, and file references without reading documentation. In the terminal, discovery has no entry point at all.
 
-The terminal already depends on a framework that ships most of the missing mechanics. `dsh-tui` imports `Editor`, `ScrollView`, `Text`, `VStack`, `Markdown`, `TuiAltScreen`, `ProcessTerminal`, `matchesKey`, and `wrapTextWithAnsi` from `@earendil-works/pi-tui`. The `Editor` carries a complete autocomplete — provider-driven suggestions, debounced queries, keyboard arbitration, and an in-editor candidate list styled through the theme the shell already passes — so the input triggers need no second menu implementation; `SelectList`, `SettingsList`, `Loader`, and `Image` remain unimported and belong to Tier C surfaces.
+The terminal already depends on a framework that ships most of the missing mechanics. `dsh-tui` imports `Editor`, `ScrollView`, `Text`, `Loader`, `VStack`, `Markdown`, `TuiAltScreen`, `ProcessTerminal`, `matchesKey`, and `wrapTextWithAnsi` from `@earendil-works/pi-tui`. The `Editor` carries a complete autocomplete — provider-driven suggestions, debounced queries, keyboard arbitration, and an in-editor candidate list styled through the theme the shell already passes — so the input triggers need no second menu implementation; `SelectList`, `SettingsList`, and `Image` remain unimported and belong to Tier C surfaces.
 
 ## Decision
 

@@ -421,7 +421,10 @@ async function start(ctx: Context, config: Config): Promise<void> {
     tui.start()
     shell.start()
     terminal.setTitle(paneTitle(shell.model))
-    yield () => { tui.stop() }
+    yield () => {
+      shell.stopStatus()
+      tui.stop()
+    }
   }, 'dsh-tui.screen')
   /** Restate the pane title after every route change the shell knows about. */
   const syncTitle = (): void => { terminal.setTitle(paneTitle(shell.model)) }
