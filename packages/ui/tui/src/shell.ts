@@ -167,7 +167,10 @@ export class TerminalShell implements PanelHost {
     // the input is empty it reads as a dim placeholder naming what the reader
     // can do. The gutter is sized from the terminal width so a narrow terminal
     // keeps a usable editor, and drops the gutter entirely below the floor.
-    this.inputRow = { render: (width: number) => this.renderInputRow(width) }
+    this.inputRow = {
+      render: (width: number) => this.renderInputRow(width),
+      invalidate: () => { this.editor.invalidate() },
+    }
     this.editor.onChange = () => { this.options.tui.requestRender() }
     const autocomplete = options.autocomplete
     if (autocomplete !== undefined) {
