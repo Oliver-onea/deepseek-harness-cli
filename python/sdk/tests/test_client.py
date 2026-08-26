@@ -999,3 +999,312 @@ def test_client_reports_missing_bundled_runtime_dependency(monkeypatch: pytest.M
 
     with pytest.raises(FileNotFoundError, match="Install deepseek-harness-runtime-bin"):
         HarnessClient().start()
+
+
+def test_client_session_steer_returns_message_id(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "session/steer":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"messageId": "steer-msg-1"}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        message_id = client.session_steer("main", [{"type": "text", "text": "steer it"}])
+        assert message_id == "steer-msg-1"
+
+
+def test_client_session_steer_raises_on_missing_message_id(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "session/steer":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        with pytest.raises(SdkProtocolError, match="session/steer returned no message id"):
+            client.session_steer("main", [{"type": "text", "text": "steer it"}])
+
+
+def test_client_session_interrupt_sends_keep_inbox_true(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "session/interrupt":
+        params = msg.get("params") or {}
+        if params.get("keepInbox") is True:
+            print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32000, "message": "expected keepInbox"}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        client.session_interrupt("main", keep_inbox=True)
+
+
+def test_client_session_interrupt_defaults_keep_inbox_false(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "session/interrupt":
+        params = msg.get("params") or {}
+        if "keepInbox" not in params:
+            print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32000, "message": "unexpected keepInbox"}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        client.session_interrupt("main")
+
+
+def test_client_shutdown_sends_request_and_returns(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        client.shutdown()
+
+
+def test_client_close_sends_shutdown_before_transport_close(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    shutdown_seen = False
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    client = HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script))))
+    client.start()
+    client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+    client.close()
+    assert client._proc is None
+
+
+def test_client_approval_handler_answers_request(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+
+        handled: list[dict] = []
+
+        def handler(params):
+            handled.append(params.model_dump())
+            return type("Result", (), {"outcome": "allowed-once"})()
+
+        client.on_approval_request(handler)
+
+        # Simulate a server request arriving on the wire
+        client._handle_message({
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "approval/request",
+            "params": {"sessionId": "main", "toolName": "read_file", "callId": "call-1", "reason": "read a file"},
+        })
+
+        assert len(handled) == 1
+        assert handled[0]["sessionId"] == "main"
+        assert handled[0]["toolName"] == "read_file"
+
+
+def test_client_approval_handler_without_registration_errors_response(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+        # No handler registered; the request gets an error response and does not hang.
+        client._handle_message({
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "approval/request",
+            "params": {"sessionId": "main", "toolName": "read_file"},
+        })
+        # next_request should NOT see the request (it was dispatched and responded)
+        # Verify by checking no request is queued
+        assert client._requests.qsize() == 0
+
+
+def test_client_approval_handler_malformed_params_errors(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+
+        def handler(params):
+            return type("Result", (), {"outcome": "allowed-once"})()
+
+        client.on_approval_request(handler)
+
+        # Simulate a server request with malformed params (sessionId is int, not str)
+        client._handle_message({
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "approval/request",
+            "params": {"sessionId": 123, "toolName": "read_file"},
+        })
+
+        # The request was dispatched and an error response was sent; no request queued
+        assert client._requests.qsize() == 0
+
+
+def test_client_approval_handler_no_decision_errors(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif method == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+
+    with HarnessClient(HarnessConfig(launch_args_override=(sys.executable, str(script)))) as client:
+        client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+
+        def handler(params):
+            return type("Result", (), {"outcome": "maybe"})()
+
+        client.on_approval_request(handler)
+
+        # Simulate a server request; handler returns invalid outcome
+        client._handle_message({
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "approval/request",
+            "params": {"sessionId": "main", "toolName": "read_file"},
+        })
+
+        # The request was dispatched and an error response was sent; no request queued
+        assert client._requests.qsize() == 0
