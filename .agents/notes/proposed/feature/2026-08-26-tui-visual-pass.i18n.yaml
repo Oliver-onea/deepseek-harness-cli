@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-26-tui-visual-pass.md
+2026-08-26-tui-visual-pass.md: 1f670f63b17e4c2ef91375952e970fa44b5683cc
+2026-08-26-tui-visual-pass.zh.md: 785f46c514bb3e9407bafce7a655124743affbc3
