@@ -526,7 +526,7 @@ describe('web-search-deepseek plugin registration', () => {
       }
       expect(caught).toMatchObject({ code: 'WEB_PROVIDER_CREDENTIAL_MISSING' })
       if (!(caught instanceof Error)) throw new Error('search did not throw an Error')
-      expect(caught.message).toMatch(/store it through the credentials service.*Models page/s)
+      expect(caught.message).toMatch(/store it through the \/key command.*Models page/s)
     } finally {
       if (prev !== undefined) process.env.DEEPSEEK_API_KEY = prev
     }

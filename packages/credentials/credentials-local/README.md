@@ -55,6 +55,10 @@ The document is `0600` under a `0700` directory, which stops other OS users — 
 
 That is discretion, not a boundary. A deployment that must keep provider keys away from its own agent cannot get there with file permissions; an OS-keychain provider — a store the model's processes cannot read at all — is the deferred answer and belongs beside this provider as a sibling package.
 
+## Slash command
+
+When a `commands` registry is composed (such as in interactive terminal sessions), the provider registers the `/key` command (`/key [<ref>] <value>`). Running `/key <value>` stores `DEEPSEEK_API_KEY`, while `/key <ref> <value>` stores a named reference into `$DSH_HOME/.credentials.yaml`. The command sets `recordInput: false` so secret values never appear in the session log or `command/run` lifecycle events.
+
 ## Model Experience
 
 Indirectly, through the consuming LLM adapters: stored values authorize their provider requests, and the adapter owns every model-visible surface.
@@ -65,6 +69,7 @@ No direct invalidation; credentials never enter a request prefix.
 
 ## Known Limitations and Deferred Work
 
+- **Terminal input does not mask typed secrets** — the `/key` command accepts the secret as a command argument on the terminal input line; the terminal input line does not mask typed characters.
 - **Same-reference concurrent writes are last-write-wins** — the writer lock and the read-modify-write keep concurrent writers from dropping each other's entries, but two writers editing one reference still resolve to the later write; there is no revision check.
 - **A same-UID process can read the document** — see [Security boundary](#security-boundary): the file-effect sandbox modes do not deny reads, and an OS-keychain provider is deferred.
 - **Environment changes are invisible** — the snapshot is frozen at launch, so a variable exported after startup reaches neither resolution nor `describe`; changing an environment-sourced credential takes a restart.

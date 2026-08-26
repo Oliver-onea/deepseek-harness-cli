@@ -47,6 +47,7 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { CredentialProvider, credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
 import type { LaunchEnvironmentEntry } from '@deepseek-ai/dsh-launch-environment'
+import type {} from '@deepseek-ai/dsh-commands'
 
 /** Basename of the credentials document inside the harness home. */
 export const CREDENTIALS_FILENAME = '.credentials.yaml'
@@ -244,6 +245,40 @@ export class LocalCredentialProvider extends CredentialProvider {
     // Programmatic construction may bypass Schemastery normalization; resolve
     // the same defaults in one explicit step either way.
     this.spec = resolveSpec(config)
+
+    this.ctx.inject(['commands'], (commandCtx) => {
+      commandCtx.commands.register({
+        name: 'key',
+        description: 'Store an API key through the credentials service',
+        input: { hint: '[<ref>] <value>' },
+        recordInput: false,
+        handler: async ({ rawInput }) => {
+          const trimmed = rawInput.trim()
+          if (trimmed.length === 0) {
+            return { kind: 'error', text: 'Usage: /key <value> or /key <ref> <value>' }
+          }
+          const firstSpaceIndex = trimmed.search(/\s/)
+          let refStr = 'DEEPSEEK_API_KEY'
+          let secret = trimmed
+          if (firstSpaceIndex !== -1) {
+            refStr = trimmed.slice(0, firstSpaceIndex)
+            secret = trimmed.slice(firstSpaceIndex).trim()
+          }
+          let ref: CredentialRef
+          try {
+            ref = credentialRef(refStr)
+          } catch (error: unknown) {
+            return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+          }
+          try {
+            await this.set(ref, secret)
+            return { kind: 'success', text: `Stored ${ref}.` }
+          } catch (error: unknown) {
+            return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
+          }
+        },
+      })
+    })
   }
 
   /** The inherited-environment value for a reference, or `undefined` when empty or unset. */

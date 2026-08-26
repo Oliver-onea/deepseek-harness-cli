@@ -431,7 +431,7 @@ describe('headless stream-json snapshots', () => {
     // environment, and stops there: configuration carries the reference, so
     // there is no literal-key escape hatch left to offer.
     expect(normalized).toContain(
-      'store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it),',
+      'store DEEPSEEK_API_KEY through the /key command (the web Models page also writes it),',
     )
     expect(normalized).toContain('or export DEEPSEEK_API_KEY in the launching environment')
     expect(normalized).not.toContain('as a last resort')
@@ -467,7 +467,7 @@ describe('headless stream-json snapshots', () => {
     // usually owns it, and stays true in a composition that mounts no Models
     // page at all.
     expect(normalized).toContain('the API key resolved from DEEPSEEK_API_KEY contains characters')
-    expect(normalized).toContain('the web Models page writes it')
+    expect(normalized).toContain('the /key command or web Models page writes it')
     // Neither the key nor its transport-level symptom (the ByteString error)
     // may reach the user: the code point of one character is still the key.
     expect(normalized).not.toContain('pasted-from-a-chat-window')

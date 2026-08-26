@@ -40,7 +40,7 @@ exports[`dsh terminal journey snapshots > /help lists the live command registry 
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
-/model [provider/model] — Show or switch the model this session uses
+/key [<ref>] <value> — Store an API key through the credentials service
 
 
 
@@ -304,7 +304,7 @@ exports[`dsh terminal journey snapshots > slash menu opens, filters, and dispatc
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
-/model [provider/model] — Show or switch the model this session uses
+/key [<ref>] <value> — Store an API key through the credentials service
 
 
 

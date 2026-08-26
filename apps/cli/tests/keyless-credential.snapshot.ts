@@ -81,4 +81,25 @@ describe('dsh keyless credential journey snapshots', () => {
       rmSync(home, { recursive: true, force: true })
     }
   }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 4) * 2)
+
+  it('shows the /key command in /help and stores a credential through it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-tui-keyless-cmd-'))
+    try {
+      const harness = createTuiHarness({ baseUrl: UNREACHED_BASE_URL, env: KEYLESS_ENV, home })
+      try {
+        await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+        harness.submit('/help')
+        await harness.waitFor('/key', DEFAULT_TURN_TIMEOUT_MS)
+        expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+        harness.submit('/key sk-test-valid-key')
+        await harness.waitFor('Stored DEEPSEEK_API_KEY.', DEFAULT_TURN_TIMEOUT_MS)
+        expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+        expect(await harness.exit()).toBe(0)
+      } finally {
+        await harness.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 2) * 2)
 })

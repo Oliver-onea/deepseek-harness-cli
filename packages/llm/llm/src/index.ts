@@ -144,9 +144,9 @@ export function assertUsableApiKey(raw: string, pkg: string, ref: string): strin
   throw new LlmError(
     checked.reason === 'empty'
       ? `${pkg}: the API key resolved from ${ref} is blank; set ${ref} to the raw key`
-        + ' (the web Models page writes it) or export it in the launching environment'
+        + ' (the /key command or web Models page writes it) or export it in the launching environment'
       : `${pkg}: the API key resolved from ${ref} contains characters no HTTP header can carry;`
-        + ` set ${ref} to the raw key alone (the web Models page writes it)`,
+        + ` set ${ref} to the raw key alone (the /key command or web Models page writes it)`,
     INVALID_CREDENTIAL_CODE,
   )
 }

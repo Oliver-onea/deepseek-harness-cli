@@ -928,7 +928,7 @@ describe('plugin registration and config', () => {
     // The guidance names both places a credential can come from, and nothing
     // else: configuration carries the reference, never a literal key.
     expect(second.finish.failure.message)
-      .toMatch(/store DEEPSEEK_API_KEY through the credentials service.*export DEEPSEEK_API_KEY/s)
+      .toMatch(/store DEEPSEEK_API_KEY through the \/key command.*export DEEPSEEK_API_KEY/s)
   })
 
   it('reads the ambient variable when no credentials seam is mounted', async () => {
