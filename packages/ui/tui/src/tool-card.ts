@@ -135,7 +135,7 @@ function fold(lines: readonly string[], layout: CardLayout, palette: Palette): s
  * @returns the single-line call title.
  */
 function callTitle(card: ToolCard): string {
-  if (card.call !== undefined && card.call.title !== undefined) return displayLine(card.call.title)
+  if (card.call !== undefined) return displayLine(card.call.title)
   return `${card.name}${shortArgs(card.rawArguments)}`
 }
 
@@ -149,7 +149,7 @@ function elbowTitle(card: ToolCard): string | undefined {
   const title = card.result?.title
   if (title === undefined) return undefined
   const line = displayLine(title)
-  if (card.call !== undefined && card.call.title !== undefined && line === displayLine(card.call.title)) {
+  if (card.call !== undefined && line === displayLine(card.call.title)) {
     return undefined
   }
   return line
