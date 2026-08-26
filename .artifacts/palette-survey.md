@@ -8,8 +8,8 @@
 | **kimi** | 5 (truecolor) | 0 | bold | Clean layout, colored file paths and instructions. |
 | **qwen** | 4 (truecolor) | 1 (truecolor) | bold | Uses distinct background behind text on the prompt line. |
 | **codex** | 0 (no truecolor) | 0 | bold, dim | Minimal styling. |
-| **agy** | 0 (no truecolor) | 0 | none | Minimal styling. |
-| **opencode**| 0 (no truecolor) | 0 | none | Minimal styling. |
+| **agy** | - | - | - | (Capture Failed - stalls at terminal capability queries) |
+| **opencode**| - | - | - | (Capture Failed - stalls during environment/DA checks) |
 | **dsh** (us) | 6 (truecolor) | 0 | bold, dim, reverse | Duplicate hues used for multiple roles. |
 
 ## Role-by-Role Table
@@ -28,9 +28,9 @@
 | **link** | Underline | Normal | Normal | Normal |
 | **quote** | Dim | Normal | Normal | Dim |
 | **inline code** | Normal | Normal | Normal | 0xa7, 0x8b, 0xfa (Purple - same as code block) |
-| **code syntax** | Yes (tokens) | No | No | No (flat purple) |
-| **diff add** | Green | Green | Green | 0x3f, 0xb9, 0x50 (Green - same as success) |
-| **diff remove**| Red | Red | Red | 0xf8, 0x51, 0x49 (Red - same as error) |
+| **code syntax** | Yes (tokens) | Yes | Yes | No (flat purple) |
+| **diff add** | Green FG | Green FG | Green FG | 0x3f, 0xb9, 0x50 (Green - same as success) |
+| **diff remove**| Red FG | Red FG | Red FG | 0xf8, 0x51, 0x49 (Red - same as error) |
 | **selection** | Reversed | Highlighted | Highlighted | Reversed |
 | **dim / meta** | 136,136,136 | 107,107,107 | 151,160,176 | Dim (SGR 2) |
 | **backgrounds**| Header bg (orange)| None | Prompt bg (gray) | None |
@@ -38,7 +38,7 @@
 ## Gap List
 
 Roles where we have no distinct treatment and at least two reference products do:
-1. **Backgrounds**: Both `claude` and `qwen` use colored backgrounds for UI regions (headers, prompts). We currently use none.
+1. **Backgrounds**: Both `claude` and `qwen` use colored backgrounds for UI regions (headers, prompts). We currently use none. Note: All measured products use foreground coloring rather than background tinting for diff lines.
 2. **Distinct Hues for Duplicate Pairs**: We currently overload the same color for `tool`/`accent`, `success`/`added`, and `error`/`removed`.
 3. **Headings/Markdown Elements**: We don't color headings, links, and quotes distinctively from normal text or dim text.
 4. **Code Syntax Highlighting**: Reference products highlight syntax tokens; we currently use a flat color for all code.
