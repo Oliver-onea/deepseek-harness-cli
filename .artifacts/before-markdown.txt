@@ -1,5 +1,5 @@
-[38;2;77;107;254m◆[39m [38;2;96;165;250m[1m[1mMain Heading[22m[22m[39m
+[38;2;77;107;254m◆[39m [1m[1m[1mMain Heading[22m[22m[22m
 
-  Here is a [38;2;56;189;248;4m[1mlink[22m[39;24m[2m (https://example.com)[22m. [3mItalics[23m and [9mstrike[29m and a quote:
+  Here is a [38;2;77;107;254m[1mlink[22m[39m[2m (https://example.com)[22m. [2mItalics[22m and [2mstrike[22m and a quote:
 
-  [2m│ [22m[38;2;20;184;166m[3mTo be or not to be[23m[39m
+  [2m│ [22m[2m[2mTo be or not to be[22m[22m
