@@ -53,7 +53,9 @@ describe('dsh keyless credential journey snapshots', () => {
         harness.type('still usable')
         await harness.waitFor('still usable', DEFAULT_TURN_TIMEOUT_MS)
         expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
-        expect(await harness.exit()).toBe(0)
+        // Leave through ctrl+c: `/exit` would append to the unsubmitted input
+        // text above and submit the joined line as a prompt instead of exiting.
+        expect(await harness.cancel()).toBe(0)
       } finally {
         await harness.dispose()
       }
