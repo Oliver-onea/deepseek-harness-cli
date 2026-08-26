@@ -10,7 +10,7 @@ English | [中文](2026-08-26-tui-as-protocol-client.zh.md)
 
 Codex is the shape being copied: one app-server protocol, and the TUI is its best-known client. This note inventories every service the terminal touches, classifies each against the protocol, answers the three feasibility questions that decide whether the TUI *can* become a protocol client, and sizes the work.
 
-The terminal-web parity plan ([2026-08-14-terminal-web-parity.md](../implemented/feature/2026-08-14-terminal-web-parity.md)) calls the protocol question orthogonal to parity. After the inventory, this holds: the protocol gap is independent of whether the terminal draws a footer field or a menu. The two efforts can proceed in parallel, and neither blocks the other.
+The terminal-web parity plan ([2026-08-14-terminal-web-parity.md](../../implemented/feature/2026-08-14-terminal-web-parity.md)) calls the protocol question orthogonal to parity. After the inventory, this holds: the protocol gap is independent of whether the terminal draws a footer field or a menu. The two efforts can proceed in parallel, and neither blocks the other.
 
 ## Proposal
 
@@ -81,6 +81,19 @@ No variant carries a function, a class instance, a symbol, or any non-serializab
 The model picker (`packages/ui/tui/src/index.ts:332-333`) changes the selection via `installModelSelection(agent.ctx, selection)`, which does not produce a model-visible input directly — it changes the model route for the next request, and the route is recorded in the `request/context` event. A protocol-based `session/selectModel` would produce the same `request/context` event.
 
 Every model-visible input path already goes through the agent loop, which produces session events. The protocol methods are thin wrappers over the same agent loop calls. Moving the terminal behind the protocol does not change which events are logged.
+
+### Relationship to Typert RPC remotes
+
+The web surface already reaches `commands.list`, `commands.execute`, and `goals.*` through Typert RPC (`ctx.remote.commands.list` etc. — see `packages/client/ui-commands/src/client/service.ts:134`). Steps 2–6 of this plan add equivalent methods to the JSON-RPC protocol. That is two RPC surfaces exposing the same capability, and the question is whether that duplication is legitimate or a mistake that a later change must undo.
+
+The two transports are legitimately separate, not duplication to converge:
+
+- **Typert RPC** is HTTP-based, session-keyed, and serves the browser web client. Its methods are typed through the Typert type-graph generator and carry the Gateway's authorization, connection lifecycle, and mux semantics. It is the web surface's transport.
+- **JSON-RPC** is stdio-based, newline-delimited, and serves external SDK clients (Python SDK, Codex-style automation). It has no HTTP lifecycle, no Gateway, and a different consumer audience: automation and headless programs, not browsers.
+
+They serve different consumers over different transports with different lifetimes. The same underlying service (`CommandRuntime.list`, `CommandRuntime.execute`) is exposed through two facades — the same pattern as `session/prompt`, which the JSON-RPC protocol already carries and the web surface also exposes through its own Typert session prompt endpoint. Convergence would mean generating one from the other, which would bind their evolution (a method the web surface needs immediately would gate on the JSON-RPC spec, or vice versa). Keeping them separate lets each surface evolve at its own pace.
+
+The sizing in this plan does not change: adding the methods to JSON-RPC is still ~4 files per step, and the terminal's migration to JSON-RPC would still be a large PR. The recommendation is unchanged: the protocol is the architecture, and the two transports are two views of it.
 
 ### Migration plan
 
@@ -154,7 +167,7 @@ The TUI's direct service access is then an in-process fast path, not a missing p
 
 The 6 protocol-only PRs are ~24 files, all small to medium, and can ship independently. The TUI refactor (Step 7) is ~8 files, large, and its only benefit is removing the `ctx.get` calls — at the cost of routing every footer read, every menu query, and every tool view through JSON serialization/deserialization inside the same process. That is a performance regression for a purity gain.
 
-If the terminal is ever rewritten (e.g., a different UI framework, or a move to a separate process), the protocol is already there. Until then, the terminal's direct service access is not a problem — it is the same pattern the web surface uses (the web host reads `ctx.llm`, `ctx.commands`, `ctx.skills`, and `ctx.subagents` the same way), and no one calls the web surface "not a client of anything."
+If the terminal is ever rewritten (e.g., a different UI framework, or a move to a separate process), the protocol is already there. Until then, the terminal's direct service access is a documented shortcut, not a missing protocol. The web surface already proves the pattern: it reaches `ctx.remote.commands.list`, `ctx.remote.commands.execute`, and `ctx.remote.goals.*` over Typert RPC — a transport. The terminal is the only surface with direct in-process access, and that is the fact that makes its internal wiring a scenic route rather than the architecture itself.
 
 ## Alternatives considered
 

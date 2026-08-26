@@ -10,7 +10,7 @@ Status: proposed
 
 Codex 是正在模仿的形态：一个应用服务器协议，TUI 只是它最知名的客户端。本笔记盘点终端接触的每一个服务，针对协议对每个服务进行分类，回答决定 TUI *能否*成为协议客户端的三个可行性问题，并估算工作量。
 
-终端-web 对等计划（[2026-08-14-terminal-web-parity.md](../implemented/feature/2026-08-14-terminal-web-parity.md)）认为协议问题与对等性正交。盘点之后，这一判断成立：协议缺口与终端是否绘制 footer 字段或菜单无关。两项工作可以并行推进，互不阻塞。
+终端-web 对等计划（[2026-08-14-terminal-web-parity.md](../../implemented/feature/2026-08-14-terminal-web-parity.md)）认为协议问题与对等性正交。盘点之后，这一判断成立：协议缺口与终端是否绘制 footer 字段或菜单无关。两项工作可以并行推进，互不阻塞。
 
 ## 提案
 
@@ -81,6 +81,19 @@ Codex 是正在模仿的形态：一个应用服务器协议，TUI 只是它最�
 模型选择器（`packages/ui/tui/src/index.ts:332-333`）通过 `installModelSelection(agent.ctx, selection)` 更改选择，这不直接产生模型可见输入——它更改下一次请求的模型路由，路由记录在 `request/context` 事件中。基于协议的 `session/selectModel` 将产生相同的 `request/context` 事件。
 
 每个模型可见输入路径都已经通过 agent 循环，产生会话事件。协议方法是对相同 agent 循环调用的薄封装。将终端移到协议后面不会改变哪些事件被记录。
+
+### 与 Typert RPC 远程调用的关系
+
+Web 界面已经通过 Typert RPC 访问 `commands.list`、`commands.execute` 和 `goals.*`（`ctx.remote.commands.list` 等——见 `packages/client/ui-commands/src/client/service.ts:134`）。本计划的步骤 2–6 将等效方法添加到 JSON-RPC 协议。这是两个 RPC 表面暴露相同的能力，问题在于这种重复是合理的还是需要后续变更来消除的错误。
+
+这两种传输是合理分开的，不是需要收敛的重复：
+
+- **Typert RPC** 基于 HTTP，按会话键控，服务于浏览器 Web 客户端。其方法通过 Typert 类型图生成器进行类型化，并携带 Gateway 的授权、连接生命周期和 mux 语义。它是 Web 界面的传输层。
+- **JSON-RPC** 基于 stdio，换行分隔，服务于外部 SDK 客户端（Python SDK、Codex 风格的自动化）。它没有 HTTP 生命周期，没有 Gateway，面向不同的消费者群体：自动化和无头程序，而非浏览器。
+
+它们通过不同的传输层服务于不同的消费者，具有不同的生命周期。相同的底层服务（`CommandRuntime.list`、`CommandRuntime.execute`）通过两个外观暴露——与 `session/prompt` 的模式相同，JSON-RPC 协议已经携带该方法，Web 界面也通过自己的 Typert 会话提示端点暴露它。收敛意味着从一个生成另一个，这将绑定它们的演化（Web 界面立即需要的方法将受制于 JSON-RPC 规范，反之亦然）。保持它们分开使每个表面可以按自己的节奏演化。
+
+本计划中的规模估算不变：向 JSON-RPC 添加方法仍然是每个步骤约 4 个文件，终端迁移到 JSON-RPC 仍然是一个大 PR。建议不变：协议就是架构，两种传输是其两个视图。
 
 ### 迁移计划
 
@@ -154,7 +167,7 @@ TUI 的直接服务访问就变成了进程内快速路径，而不是缺失的�
 
 6 个仅协议 PR 大约 24 个文件，全部是小到中等规模，可以独立交付。TUI 重构（步骤 7）大约 8 个文件，规模大，其唯一好处是移除 `ctx.get` 调用——代价是在同一进程内将每个 footer 读取、每个菜单查询和每个工具视图都通过 JSON 序列化/反序列化。这是一个为纯度收益而付出的性能退步。
 
-如果终端被重写（例如，不同的 UI 框架，或迁移到独立进程），协议已经就位。在此之前，终端的直接服务访问不是问题——它与 web 界面使用的模式相同（web 主机同样读取 `ctx.llm`、`ctx.commands`、`ctx.skills` 和 `ctx.subagents`），没有人说 web 界面"不是任何东西的客户端"。
+如果终端被重写（例如，不同的 UI 框架，或迁移到独立进程），协议已经就位。在此之前，终端的直接服务访问是记录在案的快捷方式，而不是缺失的协议。Web 界面已经证明了这一模式：它通过 Typert RPC 访问 `ctx.remote.commands.list`、`ctx.remote.commands.execute` 和 `ctx.remote.goals.*`——一个传输层。终端是唯一具有直接进程内访问的界面，正是这一事实使其内部布线成为一条风景路线，而非架构本身。
 
 ## 考虑的替代方案
 
