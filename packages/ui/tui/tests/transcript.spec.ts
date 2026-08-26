@@ -190,6 +190,49 @@ describe('Transcript', () => {
     expect((transcript.entries[0] as NoticeEntry | undefined)?.text).toBe(expected)
   })
 
+  it('keeps one notice when an identical turn failure repeats across resends', () => {
+    const { session, transcript, feed } = log()
+    const failed = (turn: number): void => {
+      feed(session.append('turn/end', {
+        turn,
+        reason: { kind: 'error', error: { message: 'no API key', code: 'MISSING_CREDENTIAL' } },
+      } as SessionEvent<'turn/end'>['data']))
+    }
+    feed(userPrompt(session, 'first'))
+    failed(0)
+    feed(userPrompt(session, 'second'))
+    failed(1)
+    expect(transcript.entries).toEqual([
+      { kind: 'user', text: 'first' },
+      { kind: 'user', text: 'second' },
+      { kind: 'notice', tone: 'error', text: 'MISSING_CREDENTIAL: no API key' },
+    ])
+  })
+
+  it('keeps distinct turn failures and failures separated by model output', () => {
+    const { session, transcript, feed } = log()
+    const failed = (turn: number, message: string): void => {
+      feed(session.append('turn/end', {
+        turn,
+        reason: { kind: 'error', error: { message, code: 'E' } },
+      } as SessionEvent<'turn/end'>['data']))
+    }
+    feed(userPrompt(session, 'one'))
+    failed(0, 'first failure')
+    feed(userPrompt(session, 'two'))
+    failed(1, 'second failure')
+    feed(userPrompt(session, 'three'))
+    feed(assistantText(session, 'an answer'))
+    feed(userPrompt(session, 'four'))
+    failed(2, 'first failure')
+    const notices = transcript.entries.filter(entry => entry.kind === 'notice')
+    expect(notices).toEqual([
+      { kind: 'notice', tone: 'error', text: 'E: first failure' },
+      { kind: 'notice', tone: 'error', text: 'E: second failure' },
+      { kind: 'notice', tone: 'error', text: 'E: first failure' },
+    ])
+  })
+
   it('draws a command outcome only when the handler said something', () => {
     const { session, transcript, feed } = log()
     feed(session.append('command/done', { commandId: CommandId('cmd-1'), kind: 'success' }))
