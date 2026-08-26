@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-26-tui-visual-pass.md
 2026-08-26-tui-visual-pass.md: dc63e42e82d74bb0985b8b2403bd1f7ff35e16c3
-2026-08-26-tui-visual-pass.zh.md: 5b229f5dd71c20d716d77f18a17f1ba7b4ee52f6
+2026-08-26-tui-visual-pass.zh.md: 206fc452354cbefda756f71ced62ef93569ac2ab
