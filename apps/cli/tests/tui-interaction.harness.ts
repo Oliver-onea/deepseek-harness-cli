@@ -113,9 +113,9 @@ export interface TuiHarness {
    */
   waitUntil(predicate: (screen: string) => boolean, timeoutMs?: number): Promise<void>
   /** Render the current screen as plain text with trailing whitespace stripped. */
-  snapshot(): string
+  snapshot(): Promise<string>
   /** Render the current screen with ANSI SGR sequences preserved. */
-  ansiSnapshot(): string
+  ansiSnapshot(): Promise<string>
   /** Return the process exit code after a graceful `/exit`. */
   exit(): Promise<number>
   /** Send `ctrl+c` and return the process exit code (exits when no turn runs). */
@@ -457,10 +457,14 @@ export function createTuiHarness(options: TuiHarnessOptions): TuiHarness {
     waitUntil(predicate: (screen: string) => boolean, timeoutMs?: number): Promise<void> {
       return waitFor(predicate, timeoutMs ?? turnTimeoutMs)
     },
-    snapshot(): string {
+    async snapshot(): Promise<string> {
+      // A frame can still be in flight when a waiter resolves mid-stream;
+      // settle the PTY before reading so the screen is never torn mid-frame.
+      await quiesce()
       return screen.plain()
     },
-    ansiSnapshot(): string {
+    async ansiSnapshot(): Promise<string> {
+      await quiesce()
       return screen.ansi()
     },
     async exit(): Promise<number> {

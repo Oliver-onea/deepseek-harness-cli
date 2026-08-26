@@ -1,23 +1,21 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`dsh terminal journey snapshots > / menu lists a staged skill and a pick submits it as a prompt 1`] = `
-"› /journey-skill
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
 
-Mock model answering the terminal.
-
-
-
-
-
-
-
-
-
-
-
+› /journey-skill
 
 
-
+◆ Mock model answering the terminal.
 
 
 
@@ -26,48 +24,61 @@ Mock model answering the terminal.
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────
 
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 13.2k/1000.0k (1%) · /help  ctrl+c
- exit"
+
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
+
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 13.2k/1000.0k (1%)"
 `;
 
 exports[`dsh terminal journey snapshots > /help lists the live command registry as text 1`] = `
-"/compact — Compact older conversation history
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+/compact — Compact older conversation history
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
 /model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > /model <route> <effort> rejects an unknown effort at pick time naming what is available 1`] = `
-"unknown effort "turbo" for deepseek-official/deepseek-v4-pro; available: default, off, high, max
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+unknown effort "turbo" for deepseek-official/deepseek-v4-pro; available: default, off, high, max
 
 
 
@@ -81,26 +92,26 @@ exports[`dsh terminal journey snapshots > /model <route> <effort> rejects an unk
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > /model <route> <effort> selects directly and reports the pinned effort 1`] = `
-"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
 
 
 
@@ -114,26 +125,26 @@ exports[`dsh terminal journey snapshots > /model <route> <effort> selects direct
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > /model drills into a route effort tier and applies the picked effort 1`] = `
-"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
 
 
 
@@ -147,26 +158,26 @@ exports[`dsh terminal journey snapshots > /model drills into a route effort tier
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > /model opens the picker, esc dismisses, and enter applies 1`] = `
-"Model switched to deepseek-official/deepseek-v4-pro (reasoning high)
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+Model switched to deepseek-official/deepseek-v4-pro (reasoning high)
 
 
 
@@ -180,26 +191,26 @@ exports[`dsh terminal journey snapshots > /model opens the picker, esc dismisses
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-pro · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > /model reports was <effort> when a pick replaces a stored explicit effort 1`] = `
-"Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+Model switched to deepseek-official/deepseek-v4-pro (reasoning off)
 
 Model switched to deepseek-official/deepseek-v4-flash (reasoning high, was off)
 
@@ -213,26 +224,24 @@ Model switched to deepseek-official/deepseek-v4-flash (reasoning high, was off)
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > @ menu offers a running child and a pick lands the reference in the composer 1`] = `
-"
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
 
 
 
@@ -248,24 +257,24 @@ exports[`dsh terminal journey snapshots > @ menu offers a running child and a pi
 
 
 
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+›  @journey-child x
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- @journey-child x
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > @ menu offers nothing when no child is running 1`] = `
-"
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
 
 
 
@@ -281,51 +290,42 @@ exports[`dsh terminal journey snapshots > @ menu offers nothing when no child is
 
 
 
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+›  @
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- @
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
 
 exports[`dsh terminal journey snapshots > slash menu opens, filters, and dispatches a pick 1`] = `
-"/compact — Compact older conversation history
+"       ▄  ▄▄▄    ▄▄
+  ▄▄█████████▄   ███▄ ▄▄▄█
+ ██████████████▄  ███████     DeepSeek Harness v<version>
+██▀▀▀████████████▄ ███▀▀      deepseek-official/deepseek-v4-flash
+██     ▀▀█████▄ ██████        <cwd>
+██        ▀████▄ ████         workspace-write
+ ██         ████████▀         / for commands · @ to mention · ctrl+c to leave
+ ▀██▄    ▄▄  ▀████▀
+   ▀███▄▄███▄▄ ▀███▄▄
+     ▀▀▀█████▀▀
+
+/compact — Compact older conversation history
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
 /model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
 
 
 
+                ────────────────────────────────────────────────────────────────────────────────────
+› / for commands
+                ────────────────────────────────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit"
+ ● ready · workspace-write · deepseek-official/deepseek-v4-flash · 0 tokens"
 `;
