@@ -420,19 +420,19 @@ describe('headless stream-json snapshots', () => {
     })
 
     // The failure reaches the caller through the stream, not stderr; the
-    // recorded transcript below pins the guidance text itself, which names
-    // both places a credential can come from and nothing else.
+    // recorded transcript below pins the guidance text itself, which names the
+    // credential store through both writers a user can reach — the terminal
+    // command and the web Models page — then the launching environment, and
+    // stops there: configuration carries the reference, so there is no
+    // literal-key escape hatch left to offer.
     expect(result.stderr).toBe('')
     const normalized = normalizeHeadlessStream(result.stdout, runCwd)
     if (refreshing) await writeFile(streamExpected, normalized)
     expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
-    // The durable failure leads with the credential store — the path that
-    // keeps the secret out of configuration files — then names the launching
-    // environment, and stops there: configuration carries the reference, so
-    // there is no literal-key escape hatch left to offer.
     expect(normalized).toContain(
-      'store DEEPSEEK_API_KEY through the credentials service (the web Models page writes it),',
+      'store DEEPSEEK_API_KEY through the credentials service (in the terminal: /credential DEEPSEEK_API_KEY <value>;',
     )
+    expect(normalized).toContain('in the web app: the Models page writes it')
     expect(normalized).toContain('or export DEEPSEEK_API_KEY in the launching environment')
     expect(normalized).not.toContain('as a last resort')
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
@@ -463,11 +463,12 @@ describe('headless stream-json snapshots', () => {
     const normalized = normalizeHeadlessStream(result.stdout, runCwd)
     if (refreshing) await writeFile(streamExpected, normalized)
     expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
-    // The durable failure names the reference to correct and the writer that
-    // usually owns it, and stays true in a composition that mounts no Models
-    // page at all.
+    // The durable failure names the reference to correct and the writers a
+    // user can reach from either surface, and stays true in a composition that
+    // mounts no Models page at all.
     expect(normalized).toContain('the API key resolved from DEEPSEEK_API_KEY contains characters')
-    expect(normalized).toContain('the web Models page writes it')
+    expect(normalized).toContain('/credential DEEPSEEK_API_KEY <value>')
+    expect(normalized).toContain('the Models page writes it')
     // Neither the key nor its transport-level symptom (the ByteString error)
     // may reach the user: the code point of one character is still the key.
     expect(normalized).not.toContain('pasted-from-a-chat-window')

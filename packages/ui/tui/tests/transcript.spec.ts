@@ -196,7 +196,7 @@ describe('Transcript', () => {
       feed(session.append('turn/end', {
         turn,
         reason: { kind: 'error', error: { message: 'no API key', code: 'MISSING_CREDENTIAL' } },
-      } as SessionEvent<'turn/end'>['data']))
+      }))
     }
     feed(userPrompt(session, 'first'))
     failed(0)
@@ -215,7 +215,7 @@ describe('Transcript', () => {
       feed(session.append('turn/end', {
         turn,
         reason: { kind: 'error', error: { message, code: 'E' } },
-      } as SessionEvent<'turn/end'>['data']))
+      }))
     }
     feed(userPrompt(session, 'one'))
     failed(0, 'first failure')

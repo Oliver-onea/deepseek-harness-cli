@@ -127,6 +127,13 @@ describe('dsh terminal journey snapshots', () => {
       await harness.waitFor('List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
       harness.key('enter')
       await harness.waitFor('/help — List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
+      // A second listing forces the scroll view to settle the full roster:
+      // the first paint can clip against the not-yet-grown content height.
+      harness.submit('/help')
+      await harness.waitUntil(
+        screen => (screen.match(/\/quit — Leave the terminal session/gu) ?? []).length === 2,
+        DEFAULT_TURN_TIMEOUT_MS,
+      )
       expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
@@ -141,6 +148,13 @@ describe('dsh terminal journey snapshots', () => {
       harness.submit('/help')
       await harness.waitFor('/help — List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
       await harness.waitFor('/exit — Leave the terminal session', DEFAULT_TURN_TIMEOUT_MS)
+      // A second listing forces the scroll view to settle the full roster:
+      // the first paint can clip against the not-yet-grown content height.
+      harness.submit('/help')
+      await harness.waitUntil(
+        screen => (screen.match(/\/quit — Leave the terminal session/gu) ?? []).length === 2,
+        DEFAULT_TURN_TIMEOUT_MS,
+      )
       expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {

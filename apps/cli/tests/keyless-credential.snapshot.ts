@@ -4,10 +4,11 @@
  * The scenario is keyless by nature — there is no key to configure — so these
  * boots run the real `dsh --profile tui` with no credential in any layer and
  * pin what the reader sees: the failure the unanswered prompt reports, the
- * single notice a repeated send keeps, and the replay a resume draws.
+ * single notice a repeated send keeps, the replay a resume draws, and the
+ * in-terminal `/credential` command that repairs the missing key.
  */
 
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -81,4 +82,40 @@ describe('dsh keyless credential journey snapshots', () => {
       rmSync(home, { recursive: true, force: true })
     }
   }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 4) * 2)
+
+  it('lists /credential in /help and stores the key without leaking it', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-tui-keyless-store-'))
+    try {
+      const harness = createTuiHarness({ baseUrl: UNREACHED_BASE_URL, env: KEYLESS_ENV, home })
+      try {
+        await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
+        harness.submit('/help')
+        await harness.waitFor('/credential', DEFAULT_TURN_TIMEOUT_MS)
+        // Describing a reference appends one more notice; the re-render it
+        // triggers settles the full command roster before the first snapshot.
+        harness.submit('/credential DEEPSEEK_API_KEY')
+        await harness.waitFor('/quit — Leave the terminal session', DEFAULT_TURN_TIMEOUT_MS)
+        await harness.waitFor('not configured; store a value with /credential', DEFAULT_TURN_TIMEOUT_MS)
+        expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+
+        const SECRET = 'sk-terminal-stored-key'
+        harness.submit(`/credential DEEPSEEK_API_KEY ${SECRET}`)
+        await harness.waitFor('Stored DEEPSEEK_API_KEY; the next request resolves it.', DEFAULT_TURN_TIMEOUT_MS)
+        const stored = normalizeScreen(harness.snapshot())
+        // The typed secret never reaches the rendered transcript.
+        expect(stored).not.toContain(SECRET)
+        expect(stored).toMatchSnapshot()
+        // The write went through the credentials service into the managed
+        // document under the harness home, not into any `.env`.
+        const storePath = join(home, '.credentials.yaml')
+        expect(existsSync(storePath)).toBe(true)
+        expect(readFileSync(storePath, 'utf8')).toContain(`DEEPSEEK_API_KEY: ${SECRET}`)
+        expect(await harness.exit()).toBe(0)
+      } finally {
+        await harness.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, (DEFAULT_BOOT_TIMEOUT_MS + DEFAULT_TURN_TIMEOUT_MS * 3) * 2)
 })

@@ -35,28 +35,28 @@ Mock model answering the terminal.
 
 exports[`dsh terminal journey snapshots > /help lists the live command registry as text 1`] = `
 "/compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
 /model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
+/exit — Leave the terminal session
+/feedback <text> — record feedback about this session
+/goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
+task
+/help — List the commands this terminal resolves
+/model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
 
 
@@ -299,28 +299,28 @@ exports[`dsh terminal journey snapshots > @ menu offers nothing when no child is
 
 exports[`dsh terminal journey snapshots > slash menu opens, filters, and dispatches a pick 1`] = `
 "/compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
 task
 /help — List the commands this terminal resolves
 /model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
+/exit — Leave the terminal session
+/feedback <text> — record feedback about this session
+/goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
+task
+/help — List the commands this terminal resolves
+/model [provider/model] — Show or switch the model this session uses
+/permission <preset> — Switch the permission preset (sandbox mode + approval policy)
+/plan [off|message] — Enter or leave plan mode
+/quit — Leave the terminal session
 
 
 
