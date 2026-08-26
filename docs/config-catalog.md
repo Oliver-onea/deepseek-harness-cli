@@ -2809,6 +2809,12 @@ export interface Config {
   session: string
   /** Whether to style output; `false` renders the same layout without SGR sequences. */
   color?: boolean
+  /**
+   * The color depth to draw at. `auto` reads the terminal's advertised
+   * capability; the other values pin one rung of the degradation ladder.
+   * Ignored when `color` is `false`.
+   */
+  colorDepth?: 'auto' | ColorDepth | 'none'
   /** Lines kept at the head of a folded tool-card body. */
   headLines?: number
   /** Lines kept at the tail of a folded tool-card body. */
@@ -2822,6 +2828,9 @@ export interface Config {
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions?: number
 }
+
+/** The color depths the palette draws at, deepest first. */
+export type ColorDepth = 'truecolor' | '256' | '16'
 ```
 
 Source: [`packages/ui/tui/src/index.ts:79`](../packages/ui/tui/src/index.ts)
