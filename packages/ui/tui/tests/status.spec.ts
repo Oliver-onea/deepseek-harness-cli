@@ -105,9 +105,9 @@ describe('formatPlanMode', () => {
 })
 
 describe('renderStatus', () => {
-  it('reads as ready with the route and the exit hint while idle', () => {
+  it('reads as ready with the route and no pinned hint while idle', () => {
     expect(renderStatus(idle, plain))
-      .toBe('ready · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit')
+      .toBe('ready · deepseek-official/deepseek-v4-flash · 0 tokens')
   })
 
   it('swaps in elapsed time and the interrupt hint while a turn runs', () => {

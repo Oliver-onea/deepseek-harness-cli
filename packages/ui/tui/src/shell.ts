@@ -11,6 +11,8 @@ import {
   ScrollView,
   VStack,
   matchesKey,
+  truncateToWidth,
+  visibleWidth,
   type Component,
   type LoaderIndicatorOptions,
   type ViewportTUI,
@@ -82,6 +84,15 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 /** The footer's spinner cadence in milliseconds. */
 const SPINNER_INTERVAL_MS = 80
 
+/** The editor's placeholder, shown dim while the input is empty. */
+const EDITOR_PLACEHOLDER = '/ for commands'
+
+/** The prompt marker that prefixes the editor's input row. */
+const PROMPT_MARKER = '›'
+
+/** Editor columns kept usable before the prompt gutter may take any width. */
+const MIN_EDITOR_COLUMNS = 8
+
 /** A style that adds nothing, for footer fields the palette already styled. */
 const IDENTITY_STYLE = (text: string): string => text
 
@@ -108,6 +119,7 @@ export class TerminalShell implements PanelHost {
   private readonly transcript = new Transcript()
   private readonly view: TranscriptView
   private readonly editor: Editor
+  private readonly inputRow: Component
   private readonly status: Loader
   private readonly runningIndicator: LoaderIndicatorOptions
   private readonly idleIndicator: LoaderIndicatorOptions
@@ -151,6 +163,12 @@ export class TerminalShell implements PanelHost {
       },
     }, { paddingX: EDITOR_PADDING_X })
     this.editor.onSubmit = (text: string) => { void this.submit(text) }
+    // The prompt marker sits in a gutter beside the editor's input row; while
+    // the input is empty it reads as a dim placeholder naming what the reader
+    // can do. The gutter is sized from the terminal width so a narrow terminal
+    // keeps a usable editor, and drops the gutter entirely below the floor.
+    this.inputRow = { render: (width: number) => this.renderInputRow(width) }
+    this.editor.onChange = () => { this.options.tui.requestRender() }
     const autocomplete = options.autocomplete
     if (autocomplete !== undefined) {
       this.editor.setAutocompleteProvider(new TerminalAutocomplete({
@@ -172,7 +190,7 @@ export class TerminalShell implements PanelHost {
         minSize: 1,
       },
       {
-        component: new VStack([this.editor, this.status]),
+        component: new VStack([this.inputRow, this.status]),
         basis: 'auto',
         shrink: 1,
         minSize: 1,
@@ -244,6 +262,42 @@ export class TerminalShell implements PanelHost {
   /** Stop the footer's animation; the screen effect calls this on teardown. */
   stopStatus(): void {
     this.status.stop()
+  }
+
+  /**
+   * Compose the editor's input row with a prompt gutter beside it. The gutter
+   * carries the `›` marker, and while the input is empty and no menu is open
+   * it widens into a dim placeholder naming what the reader can do; once the
+   * reader types or opens a menu it narrows to the marker so the editor and
+   * its inline menu keep their width. The gutter drops out entirely on a
+   * terminal too narrow to keep the editor usable beside it.
+   * @param width - the row's available width in columns.
+   * @returns the composed lines.
+   */
+  private renderInputRow(width: number): string[] {
+    const palette = this.options.palette
+    const marker = palette.user(PROMPT_MARKER)
+    const markerGutter = visibleWidth(`${PROMPT_MARKER} `)
+    let gutter = 0
+    let content = ''
+    if (this.editor.getText() === '' && !this.editor.isShowingAutocomplete()) {
+      const full = visibleWidth(`${PROMPT_MARKER} ${EDITOR_PLACEHOLDER}`)
+      const available = Math.min(full, width - MIN_EDITOR_COLUMNS)
+      if (available >= markerGutter) {
+        gutter = available
+        content = truncateToWidth(`${marker} ${palette.dim(EDITOR_PLACEHOLDER)}`, gutter)
+      }
+    }
+    if (gutter === 0 && width - MIN_EDITOR_COLUMNS >= markerGutter) {
+      gutter = markerGutter
+      content = marker
+    }
+    if (gutter === 0) return this.editor.render(width)
+    content += ' '.repeat(Math.max(0, gutter - visibleWidth(content)))
+    const editorLines = this.editor.render(Math.max(1, width - gutter))
+    const blank = ' '.repeat(gutter)
+    const markerRow = editorLines.length >= 2 ? 1 : 0
+    return editorLines.map((line, index) => (index === markerRow ? content : blank) + line)
   }
 
   /**

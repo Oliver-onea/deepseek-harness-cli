@@ -155,8 +155,9 @@ export function renderStatus(input: StatusInput, palette: Palette): string {
   const plan = formatPlan(input.todos)
   if (plan !== undefined) fields.push(palette.dim(plan))
   if (input.queued > 0) fields.push(palette.warn(`${input.queued} queued`))
-  // `ctrl+c` is the one interrupt that always holds: `esc` first dismisses
-  // an open menu, so the running hint names the guaranteed key.
-  fields.push(palette.dim(input.running ? 'ctrl+c interrupt' : '/help  ctrl+c exit'))
+  // The interrupt hint belongs to the running turn, where it applies; the
+  // idle footer pins nothing, since the editor's own placeholder carries the
+  // standing key hints.
+  if (input.running) fields.push(palette.dim('ctrl+c interrupt'))
   return fields.join(palette.dim(' · '))
 }

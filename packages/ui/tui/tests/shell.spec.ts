@@ -479,6 +479,25 @@ describe('TerminalShell', () => {
     shell.stopStatus()
   })
 
+  it('shows the dim placeholder beside an empty input and the marker once typing starts', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const empty = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(empty).toContain('› / for commands')
+
+    ;(tui.focused as { handleInput(data: string): void }).handleInput('x')
+    const typed = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(typed).toContain('›')
+    expect(typed).not.toContain('/ for commands')
+  })
+
+  it('keeps the editor full-width on a terminal too narrow for the gutter', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const narrow = (tui.layoutRoot as { render(width: number): string[] }).render(9).join('\n')
+    expect(narrow).not.toContain('›')
+  })
+
   it('reflects changing goal state without a new session event', () => {
     let goal: { objective: string; phase: string } | undefined = { objective: 'first', phase: 'active' }
     const { shell, tui } = shellFor({ state: { goal: () => goal } })
