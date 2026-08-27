@@ -49,11 +49,11 @@ describe('dsh keyless credential journey snapshots', () => {
         harness.submit('say hi again')
         await harness.waitUntil(screen => /working \d+s/u.test(screen), DEFAULT_TURN_TIMEOUT_MS)
         await harness.waitUntil(screen => screen.includes('ready'), DEFAULT_TURN_TIMEOUT_MS)
-        expect(harness.snapshot().match(/MISSING_CREDENTIAL/gu) ?? []).toHaveLength(1)
+        expect((await harness.snapshot()).match(/MISSING_CREDENTIAL/gu) ?? []).toHaveLength(1)
         // The input line still accepts the next message.
         harness.type('still usable')
         await harness.waitFor('still usable', DEFAULT_TURN_TIMEOUT_MS)
-        expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+        expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
         // Leave through ctrl+c: `/exit` would append to the unsubmitted input
         // text above and submit the joined line as a prompt instead of exiting.
         expect(await harness.cancel()).toBe(0)
@@ -71,9 +71,9 @@ describe('dsh keyless credential journey snapshots', () => {
         await second.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
         // The replayed log carries the same failure as exactly one notice.
         await second.waitFor('MISSING_CREDENTIAL', DEFAULT_TURN_TIMEOUT_MS)
-        expect(second.snapshot()).toContain('say hi')
-        expect(second.snapshot().match(/MISSING_CREDENTIAL/gu) ?? []).toHaveLength(1)
-        expect(normalizeScreen(second.snapshot())).toMatchSnapshot()
+        expect(await second.snapshot()).toContain('say hi')
+        expect((await second.snapshot()).match(/MISSING_CREDENTIAL/gu) ?? []).toHaveLength(1)
+        expect(normalizeScreen(await second.snapshot())).toMatchSnapshot()
         expect(await second.exit()).toBe(0)
       } finally {
         await second.dispose()
@@ -96,12 +96,12 @@ describe('dsh keyless credential journey snapshots', () => {
         harness.submit('/credential DEEPSEEK_API_KEY')
         await harness.waitFor('/quit — Leave the terminal session', DEFAULT_TURN_TIMEOUT_MS)
         await harness.waitFor('not configured; store a value with /credential', DEFAULT_TURN_TIMEOUT_MS)
-        expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+        expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
 
         const SECRET = 'sk-terminal-stored-key'
         harness.submit(`/credential DEEPSEEK_API_KEY ${SECRET}`)
         await harness.waitFor('Stored DEEPSEEK_API_KEY; the next request resolves it.', DEFAULT_TURN_TIMEOUT_MS)
-        const stored = normalizeScreen(harness.snapshot())
+        const stored = normalizeScreen(await harness.snapshot())
         // The typed secret never reaches the rendered transcript.
         expect(stored).not.toContain(SECRET)
         expect(stored).toMatchSnapshot()
