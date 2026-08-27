@@ -184,7 +184,7 @@ export class Transcript {
         this.plan = event.data.todos
         return true
       case 'turn/end':
-        return this.push(turnEndNotice(event.data.reason))
+        return this.appendTurnEnd(event.data.reason)
       case 'command/done':
         return this.push(commandNotice(event.data))
       case 'compaction/end':
@@ -204,6 +204,35 @@ export class Transcript {
    */
   private push(entry: TranscriptEntry | undefined): boolean {
     if (entry === undefined) return false
+    this.items.push(entry)
+    return true
+  }
+
+  /**
+   * Fold one turn ending. A failed turn draws its code and message as an
+   * error notice; a resend against an unchanged failure replaces the identical
+   * error notice instead of stacking another, so repeated keyless sends leave
+   * one visible failure, always the newest. The replacement only reaches back
+   * across user entries: any assistant, reasoning, tool, or other notice in
+   * between means the earlier failure belongs to a different moment and stays.
+   * The same fold runs live and on resume, so both views keep one notice.
+   * @param reason - the logged turn-end reason.
+   * @returns whether the drawn content changed.
+   */
+  private appendTurnEnd(reason: SessionEvent<'turn/end'>['data']['reason']): boolean {
+    const entry = turnEndNotice(reason)
+    if (entry === undefined) return false
+    if (entry.tone === 'error') {
+      for (let index = this.items.length - 1; index >= 0; index -= 1) {
+        const candidate = this.items[index]
+        if (candidate === undefined) break
+        if (candidate.kind === 'user') continue
+        if (candidate.kind === 'notice' && candidate.tone === 'error' && candidate.text === entry.text) {
+          this.items.splice(index, 1)
+        }
+        break
+      }
+    }
     this.items.push(entry)
     return true
   }
