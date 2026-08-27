@@ -98,20 +98,34 @@ const IDENTITY_STYLE = (text: string): string => text
 
 /**
  * Route one submitted line: a slash command the registry knows runs as a
- * command, and everything else is conversation.
+ * command, a line shaped like a slash command it does not know is refused
+ * locally, and everything else is conversation.
  */
 type Submission =
   | { kind: 'command'; line: string }
+  | { kind: 'unknown-command'; name: string }
   | { kind: 'prompt'; text: string }
 
 /**
  * Classify a submitted line without dispatching it.
+ *
+ * A line that parses as a command name the registry cannot resolve never
+ * becomes conversation. Forwarding it would send its arguments to the model,
+ * and a mistyped `/credential` carries a secret in those arguments.
+ * {@link commandNameOf} only matches a slash followed by an identifier and a
+ * word break, so ordinary prose beginning with a path stays a prompt.
+ * A composition that mounts no registry has no commands to be unknown against,
+ * so every line there is conversation.
  * @param line - the exact text the reader submitted.
  * @param known - whether the registry resolves this line to a command.
+ * @param registryMounted - whether the composition serves a command registry at all.
  * @returns how the line should be handled.
  */
-export function classifySubmission(line: string, known: boolean): Submission {
-  return known ? { kind: 'command', line } : { kind: 'prompt', text: line }
+export function classifySubmission(line: string, known: boolean, registryMounted: boolean): Submission {
+  if (known) return { kind: 'command', line }
+  const name = commandNameOf(line)
+  if (name === undefined || !registryMounted) return { kind: 'prompt', text: line }
+  return { kind: 'unknown-command', name }
 }
 
 /** The live terminal conversation. */
@@ -387,13 +401,46 @@ export class TerminalShell implements PanelHost {
     const commands = this.options.commands
     const agent = this.options.agent
     const known = commands !== undefined && commands.find(agent, commandNameOf(line) ?? '') !== undefined
-    const submission = classifySubmission(line, known)
+    const submission = classifySubmission(line, known, commands !== undefined)
     if (submission.kind === 'command') {
       // The registry is what resolved this line, so it exists here.
       await this.runCommand(commands as CommandRuntime, submission.line)
       return
     }
+    if (submission.kind === 'unknown-command') {
+      // A user-invocable skill is invoked as `/name` and reaches the model as a
+      // prompt, so the catalog decides before the line is refused. Only this
+      // path pays the lookup: prompts and resolved commands never reach it.
+      if (await this.namesASkill(submission.name)) {
+        this.prompt(line)
+        return
+      }
+      // Only the name is echoed: the arguments of a mistyped /credential are a secret.
+      this.transcript.notice('error', `Unknown command: /${submission.name} — run /help for the list`)
+      this.options.tui.requestRender()
+      return
+    }
     this.prompt(submission.text)
+  }
+
+  /**
+   * Whether the composition serves a user-invocable skill under this name.
+   *
+   * A catalog that cannot be read answers `true`: forwarding a line the reader
+   * meant as a skill is the recoverable failure, and refusing every skill
+   * because the catalog is momentarily unavailable is not.
+   * @param name - the command-shaped name the reader submitted.
+   * @returns whether the line should reach the model as a skill invocation.
+   */
+  private async namesASkill(name: string): Promise<boolean> {
+    const list = this.options.autocomplete?.skills
+    if (list === undefined) return false
+    try {
+      return (await list(new AbortController().signal)).some(skill => skill.name === name)
+    } catch {
+      // The catalog read failed; nothing else in this method can throw.
+      return true
+    }
   }
 
   /**

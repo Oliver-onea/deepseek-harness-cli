@@ -5,7 +5,7 @@ import { CommandId, type CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TerminalShell, classifySubmission, commandNameOf, paneTitle } from '../src/shell.ts'
-import type { MenuSkill } from '../src/autocomplete.ts'
+import type { AutocompleteOptions, MenuSkill } from '../src/autocomplete.ts'
 import { createPalette } from '../src/theme.ts'
 import type { ToolPresenter } from '../src/view.ts'
 
@@ -145,7 +145,12 @@ function shellWithMenus(over: { rows?: number; children?: { name: string }[]; sk
   }
 }
 
-function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime; state?: StateReaders } = {}): {
+function shellFor(over: {
+  agent?: AgentStub
+  commands?: CommandRuntime
+  state?: StateReaders
+  autocomplete?: AutocompleteOptions
+} = {}): {
   shell: TerminalShell
   tui: ReturnType<typeof fakeTui>
   agent: AgentStub
@@ -166,6 +171,7 @@ function shellFor(over: { agent?: AgentStub; commands?: CommandRuntime; state?: 
     tailLines: 2,
     showReasoning: false,
     defaultRoute: undefined,
+    autocomplete: over.autocomplete,
   })
   return { shell, tui, agent }
 }
@@ -192,9 +198,30 @@ describe('commandNameOf', () => {
 })
 
 describe('classifySubmission', () => {
-  it('routes a resolved command as a command and everything else as a prompt', () => {
-    expect(classifySubmission('/compact', true)).toEqual({ kind: 'command', line: '/compact' })
-    expect(classifySubmission('/compact', false)).toEqual({ kind: 'prompt', text: '/compact' })
+  it('routes a resolved command as a command', () => {
+    expect(classifySubmission('/compact', true, true)).toEqual({ kind: 'command', line: '/compact' })
+  })
+
+  it('refuses a command-shaped line the registry cannot resolve', () => {
+    expect(classifySubmission('/compact', false, true)).toEqual({ kind: 'unknown-command', name: 'compact' })
+  })
+
+  it('keeps a secret out of the model when the command name is mistyped', () => {
+    // A mistyped /credential used to fall through to conversation, which put the
+    // key on screen and in the outgoing request. Only the name survives here.
+    const submission = classifySubmission('/credentail DEEPSEEK_API_KEY sk-live-secret', false, true)
+    expect(submission).toEqual({ kind: 'unknown-command', name: 'credentail' })
+    expect(JSON.stringify(submission)).not.toContain('sk-live-secret')
+  })
+
+  it('leaves prose that merely opens with a path as a prompt', () => {
+    expect(classifySubmission('/usr/bin/env is where env lives', false, true))
+      .toEqual({ kind: 'prompt', text: '/usr/bin/env is where env lives' })
+    expect(classifySubmission('what is 2+2', false, true)).toEqual({ kind: 'prompt', text: 'what is 2+2' })
+  })
+
+  it('prompts with every line when the composition mounts no registry', () => {
+    expect(classifySubmission('/compact', false, false)).toEqual({ kind: 'prompt', text: '/compact' })
   })
 })
 
@@ -379,11 +406,31 @@ describe('TerminalShell', () => {
     expect(drawn).not.toContain('handler exploded')
   })
 
-  it('prompts the model with a slash line the registry does not resolve', async () => {
+  it('refuses a slash line the registry does not resolve instead of prompting the model', async () => {
+    // This line used to reach the model. It stopped when a mistyped /credential
+    // was shown to send the reader's API key to the provider in cleartext: the
+    // registry could not resolve the name, so the whole line — secret included —
+    // became conversation. A skill still reaches the model; see the case below.
     const commands = { find: () => undefined, execute: vi.fn() } as unknown as CommandRuntime
     const { shell, tui, agent } = shellFor({ commands })
     shell.start()
-    await submit(tui, '/nope')
+    await submit(tui, '/nope DEEPSEEK_API_KEY sk-live-secret')
+    expect(agent.followups).toHaveLength(0)
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).toContain('Unknown command: /nope')
+    expect(drawn).not.toContain('sk-live-secret')
+  })
+
+  it('prompts the model with a slash line that names a user-invocable skill', async () => {
+    const commands = { find: () => undefined, execute: vi.fn() } as unknown as CommandRuntime
+    const autocomplete: AutocompleteOptions = {
+      commands: () => [],
+      skills: () => Promise.resolve([{ name: 'review', description: 'Review a diff', modelInvocable: true }]),
+      maxVisible: 8,
+    }
+    const { shell, tui, agent } = shellFor({ commands, autocomplete })
+    shell.start()
+    await submit(tui, '/review')
     expect(agent.followups).toHaveLength(1)
   })
 
