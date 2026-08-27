@@ -2,6 +2,12 @@
 
 [English](README.md) | 中文
 
+> **这是一份个人 fork，不是 DeepSeek 的发布版。**
+>
+> 它从上游的 `0.1.0-rc.5` 分叉而来（标记为 `upstream/0.1.0-rc.5`），并带有上游没有的工作：终端的视觉层与配色、无密钥首次运行时会报出缺失的凭据而不是沉默、`/credential` 命令，以及 Python SDK 的交互能力对齐。`git log upstream/0.1.0-rc.5..master` 是完整清单。
+>
+> 它不向 npm 发布任何东西，因此 **`npx @deepseek-ai/dsh` 得到的是上游发布版，不是这棵树**。运行这份 fork 的唯一方式是下面的“从源码运行”。它的版本线是自己的——这里的 `0.2.0` 与上游的 `0.1.x` 无关，终端也会自称 `DeepSeek Harness (fork)`，使一份本地构建不会被误认为已发布的产品。
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。
@@ -12,7 +18,9 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 
 ## 运行
 
-### 通过 `npm` 运行
+### 通过 `npm` 运行 —— 仅限上游
+
+`npx` 从登录源安装，而这份 fork 不向那里发布任何东西，所以这些命令得到的是**上游的 DeepSeek 发布版**。列出它们是因为那是运行上游的方式，不是运行这份 fork 的方式；对这棵树请使用下面的“从源码运行”。
 
 安装 `Node.js`，然后运行：
 
@@ -32,19 +40,29 @@ npx @deepseek-ai/dsh web
 
 ### 从源码运行
 
-如需从仓库源码运行：
+这才是运行**这份 fork** 的方式。它需要 Node `^22.19.0 || >=24.0.0` 与 pnpm 11：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/Oliver-onea/deepseek-harness-cli.git
+cd deepseek-harness-cli
 pnpm install
 pnpm run build
 pnpm dsh
 ```
 
+`pnpm dsh` 会打开终端。若想在 `PATH` 上得到一个裸的 `dsh`，把构建出的可执行文件链接过去：
+
+```sh
+ln -s "$PWD/apps/cli/lib/bin.js" ~/.local/bin/dsh
+```
+
+启动不需要 API key。没有 key 时发送消息，终端会报出缺失的凭据；用 `/credential DEEPSEEK_API_KEY <值>` 就地存入，或在启动前导出 `DEEPSEEK_API_KEY`。
+
+如需改为克隆上游，请使用 `https://github.com/deepseek-ai/deepseek-harness.git`。
+
 ## 社区与支持
 
-- 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
+- **这份 fork 没有 issue 追踪**，而它的改动也不该由上游负责支持。上游的 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 面向 DeepSeek 发布版；在向那里报告之前，请先对照上游确认问题是否存在。
 - 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
 - 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
 
