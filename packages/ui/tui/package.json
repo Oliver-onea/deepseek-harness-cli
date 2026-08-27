@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tui",
   "description": "Full-screen terminal front door: a Cordis plugin that renders one agent session and owns terminal input",
-  "version": "0.1.0-rc.5",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public"
   },

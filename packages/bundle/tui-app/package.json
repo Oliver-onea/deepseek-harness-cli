@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tui-app",
   "description": "The dsh terminal-surface bundle: the full-screen patch layer over dsh-base plus the command-line provider that resolves its session and first task",
-  "version": "0.1.0-rc.5",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public"
   },
