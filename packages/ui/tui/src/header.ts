@@ -17,6 +17,18 @@ import type { ColorDepth } from './theme.ts'
 import type { Palette } from './theme.ts'
 import { renderWhale } from './whale.ts'
 
+/**
+ * The name this build presents itself under.
+ *
+ * This repository is a fork of DeepSeek Harness carrying changes upstream does
+ * not have, and it publishes nothing to npm: the `@deepseek-ai` scope belongs
+ * to the upstream maintainers. The marker keeps a reader from reporting a local
+ * build's behaviour as the released product's. The version beside it is this
+ * fork's own line, not upstream's — see
+ * `.agents/notes/proposed/process/2026-08-27-fork-version-line.md`.
+ */
+const PRODUCT_NAME = 'DeepSeek Harness (fork)'
+
 /** Everything the cold-open header reports. */
 export interface ColdOpenInput {
   /** The provider route requests will go to. */
@@ -89,7 +101,7 @@ function padVisible(line: string, width: number): string {
 function identityLines(input: ColdOpenInput, palette: Palette, version: string, hint: boolean): string[] {
   const route = `${displayLine(input.provider)}/${displayLine(input.model)}`
   const lines = [
-    `${palette.bold('DeepSeek Harness')} ${palette.dim(`v${version}`)}`,
+    `${palette.bold(PRODUCT_NAME)} ${palette.dim(`v${version}`)}`,
     palette.dim(route),
     palette.dim(displayLine(collapseHome(input.cwd))),
   ]
@@ -108,7 +120,7 @@ function identityLines(input: ColdOpenInput, palette: Palette, version: string, 
 function oneLineHeader(input: ColdOpenInput, palette: Palette, version: string): string[] {
   const route = `${displayLine(input.provider)}/${displayLine(input.model)}`
   const preset = input.permissionPreset === undefined ? '' : ` · ${displayLine(input.permissionPreset)}`
-  const line = `${palette.bold('DeepSeek Harness')} ${palette.dim(`v${version}`)}`
+  const line = `${palette.bold(PRODUCT_NAME)} ${palette.dim(`v${version}`)}`
     + `${palette.dim(' · ')}${palette.dim(route)}${palette.dim(preset)}`
   return [truncateToWidth(line, Math.max(1, input.columns))]
 }

@@ -123,6 +123,29 @@ async function publishTarball(tarball: string, name: string, version: string): P
   }
 }
 
+/** The environment variable that unlocks publishing, and the value it must carry. */
+const PUBLISH_UNLOCK = { name: 'DSH_ALLOW_FORK_PUBLISH', value: 'i-own-this-scope' } as const
+
+/**
+ * Refuse to publish unless the operator has stated they own the scope.
+ *
+ * This repository is a fork whose 224 packages are still named `@deepseek-ai/*`,
+ * a scope owned by the upstream maintainers, and it is installed by symlinking
+ * the built binary rather than from a registry. A stray `release:publish` would
+ * aim 224 tarballs at someone else's namespace; the registry would reject them,
+ * but the attempt should not depend on that. Renaming the scope is the real fix
+ * and is the first task if this is ever distributed
+ * ([convention](../../.agents/notes/proposed/process/2026-08-27-fork-version-line.md)).
+ * @throws when the unlock variable is absent or carries any other value.
+ */
+function refuseForkPublish(): void {
+  if (process.env[PUBLISH_UNLOCK.name] === PUBLISH_UNLOCK.value) return
+  throw new Error(
+    'publish refused: this fork publishes nothing, and its packages still carry the upstream'
+    + ` @deepseek-ai scope. Rename the scope first. To override, set ${PUBLISH_UNLOCK.name}=${PUBLISH_UNLOCK.value}.`,
+  )
+}
+
 /** Publish the family named by `--family` from the directory named by `--from`. */
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -132,6 +155,8 @@ async function main(): Promise<void> {
   if (values.family === undefined || values.from === undefined) {
     throw new Error('usage: publish.ts --family <dsh|vendor> --from <packed directory>')
   }
+
+  refuseForkPublish()
 
   const family = releaseFamily(values.family)
   const directory = resolve(process.cwd(), values.from)
