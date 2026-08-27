@@ -7,8 +7,8 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startMockLlmServer, type MockLlmServer } from '@deepseek-ai/dsh-llm-mock-server'
@@ -19,14 +19,29 @@ const ANSWER = 'Mock model answering the terminal.'
 const STAGE_CHILD_PLUGIN = fileURLToPath(new URL('./fixtures/tui-journey/stage-subagent-child.ts', import.meta.url))
 const STAGE_SKILL_PLUGIN = fileURLToPath(new URL('./fixtures/tui-journey/stage-skill.ts', import.meta.url))
 
+/** The repo root the harness launches the terminal in; it is the session cwd. */
+const REPO_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
+
+/** The cwd exactly as the cold-open header prints it, home prefix collapsed. */
+const COLLAPSED_ROOT = REPO_ROOT === homedir()
+  ? '~'
+  : REPO_ROOT.startsWith(homedir() + sep) ? `~${REPO_ROOT.slice(homedir().length)}` : REPO_ROOT
+
 /**
- * Normalize screen output for snapshot stability. Elapsed seconds in the
- * running-turn footer vary between runs; everything else (command roster,
- * route names, model catalog, child label) is deterministic under the
- * keyless mock and the default terminal geometry.
+ * Normalize screen output for snapshot stability. Elapsed seconds and the
+ * spinner frame in the running-turn footer vary between runs; the cold-open
+ * header prints the session cwd and the package version, which vary by
+ * machine and release. Everything else (command roster, route names, model
+ * catalog, child label) is deterministic under the keyless mock and the
+ * default terminal geometry.
  */
 function normalizeScreen(screen: string): string {
-  return screen.replace(/\bworking \d+s\b/g, 'working <N>s')
+  return screen
+    .replace(/\bworking \d+s\b/g, 'working <N>s')
+    .replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?= working)/gu, '<spinner>')
+    .replaceAll(COLLAPSED_ROOT, '<cwd>')
+    .replaceAll(REPO_ROOT, '<cwd>')
+    .replace(/\bv\d+\.\d+\.\d+[^\s·]*/g, 'v<version>')
 }
 
 /**
@@ -81,10 +96,13 @@ describe('dsh terminal interaction under a real PTY', () => {
     const harness = createTuiHarness({ baseUrl: server?.baseURL ?? '' })
     try {
       await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
-      const screen = harness.snapshot()
+      const screen = await harness.snapshot()
       expect(screen).toContain('ready')
       expect(screen).toContain('deepseek-official/deepseek-v4-flash')
-      expect(screen).toContain('/help')
+      // The cold-open header carries the identity and the standing hints; the
+      // footer pins no /help tail.
+      expect(screen).toContain('DeepSeek Harness')
+      expect(screen).toContain('/ for commands')
     } finally {
       await harness.dispose()
     }
@@ -127,7 +145,7 @@ describe('dsh terminal journey snapshots', () => {
       await harness.waitFor('List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
       harness.key('enter')
       await harness.waitFor('/help — List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -141,7 +159,7 @@ describe('dsh terminal journey snapshots', () => {
       harness.submit('/help')
       await harness.waitFor('/help — List the commands this terminal resolves', DEFAULT_TURN_TIMEOUT_MS)
       await harness.waitFor('/exit — Leave the terminal session', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -164,7 +182,7 @@ describe('dsh terminal journey snapshots', () => {
       // prove the cursor landed after the inserted reference.
       harness.type('x')
       await harness.waitFor('@journey-child x', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.cancel()).toBe(0)
     } finally {
       await harness.dispose()
@@ -184,7 +202,7 @@ describe('dsh terminal journey snapshots', () => {
         screen => !screen.includes('journey-child'),
         DEFAULT_TURN_TIMEOUT_MS,
       )
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.cancel()).toBe(0)
     } finally {
       await harness.dispose()
@@ -208,7 +226,7 @@ describe('dsh terminal journey snapshots', () => {
       // assistant response.
       await harness.waitFor('/journey-skill', DEFAULT_TURN_TIMEOUT_MS)
       await harness.waitFor(ANSWER, DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -236,7 +254,7 @@ describe('dsh terminal journey snapshots', () => {
       harness.key('down')
       harness.key('enter')
       await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -257,7 +275,7 @@ describe('dsh terminal journey snapshots', () => {
       await harness.waitFor('off — Off', DEFAULT_TURN_TIMEOUT_MS)
       harness.type('2')
       await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -270,7 +288,7 @@ describe('dsh terminal journey snapshots', () => {
       await harness.waitFor('ready', DEFAULT_BOOT_TIMEOUT_MS)
       harness.submit('/model deepseek-v4-pro off')
       await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -284,7 +302,7 @@ describe('dsh terminal journey snapshots', () => {
       harness.submit('/model deepseek-v4-pro turbo')
       await harness.waitFor('unknown effort "turbo" for deepseek-official/deepseek-v4-pro', DEFAULT_TURN_TIMEOUT_MS)
       await harness.waitFor('available: default, off, high, max', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()
@@ -299,7 +317,7 @@ describe('dsh terminal journey snapshots', () => {
       await harness.waitFor('Model switched to deepseek-official/deepseek-v4-pro (reasoning off)', DEFAULT_TURN_TIMEOUT_MS)
       harness.submit('/model deepseek-v4-flash')
       await harness.waitFor('Model switched to deepseek-official/deepseek-v4-flash (reasoning high, was off)', DEFAULT_TURN_TIMEOUT_MS)
-      expect(normalizeScreen(harness.snapshot())).toMatchSnapshot()
+      expect(normalizeScreen(await harness.snapshot())).toMatchSnapshot()
       expect(await harness.exit()).toBe(0)
     } finally {
       await harness.dispose()

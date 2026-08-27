@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
-import { renderToolCard, type CardLayout, type ToolCard } from '../src/tool-card.ts'
+import { renderToolCard, shortArgs, type CardLayout, type ToolCard } from '../src/tool-card.ts'
 import { createPalette } from '../src/theme.ts'
 import type { ToolOutcome } from '../src/transcript.ts'
 
@@ -9,7 +9,7 @@ const palette = createPalette(false)
 const layout: CardLayout = { headLines: 2, tailLines: 1, expanded: false }
 
 function card(over: Partial<ToolCard> = {}): ToolCard {
-  return { name: 'bash', call: undefined, result: undefined, outcome: undefined, ...over }
+  return { name: 'bash', rawArguments: '', call: undefined, result: undefined, outcome: undefined, ...over }
 }
 
 function textOutcome(text: string, isError = false): ToolOutcome {
@@ -26,11 +26,32 @@ describe('renderToolCard', () => {
     expect(renderToolCard(card({ call }), palette, layout)).toEqual(['· List files'])
   })
 
-  it('marks a settled call and prefers the result title', () => {
+  it('marks a settled call, keeping the call line and attaching the result title', () => {
     const call: ToolCallView = { card: 'generic', title: 'Running' }
     const result: ToolResultView = { card: 'generic', title: 'Listed 3 files' }
     const lines = renderToolCard(card({ call, result, outcome: textOutcome('a\nb\nc') }), palette, layout)
-    expect(lines[0]).toBe('✓ Listed 3 files')
+    expect(lines).toEqual(['✓ Running', '╰ Listed 3 files', '  a', '  b', '  c'])
+  })
+
+  it('colors the elbow line for a failed result', () => {
+    const colored = createPalette(true, 'truecolor')
+    const call: ToolCallView = { card: 'generic', title: 'Running' }
+    const result: ToolResultView = { card: 'generic', title: 'exit code 1' }
+    const lines = renderToolCard(card({ call, result, outcome: textOutcome('boom', true) }), colored, layout)
+    expect(lines[0]).toBe('\x1b[38;2;248;81;73m✗\x1b[39m \x1b[38;2;217;70;239mRunning\x1b[39m')
+    expect(lines[1]).toBe(`╰ ${colored.error('exit code 1')}`)
+  })
+
+  it('drops the elbow when the result title repeats the call title', () => {
+    const call: ToolCallView = { card: 'generic', title: 'Same' }
+    const result: ToolResultView = { card: 'generic', title: 'Same' }
+    const lines = renderToolCard(card({ call, result, outcome: textOutcome('done') }), palette, layout)
+    expect(lines).toEqual(['✓ Same', '  done'])
+  })
+
+  it('names an unpresented call as name(args)', () => {
+    const lines = renderToolCard(card({ rawArguments: '{"command":"git status"}' }), palette, layout)
+    expect(lines).toEqual(['· bash (git status)'])
   })
 
   it('marks a failed call', () => {
@@ -172,5 +193,28 @@ describe('renderToolCard', () => {
   it('draws the whole body once the reader expands cards', () => {
     const lines = renderToolCard(card({ outcome: textOutcome('1\n2\n3\n4\n5\n6') }), palette, { ...layout, expanded: true })
     expect(lines).toHaveLength(7)
+  })
+})
+
+describe('shortArgs', () => {
+  it('prefers an identifying field over later ones', () => {
+    expect(shortArgs('{"command":"ls -la","cwd":"/w"}')).toBe(' (ls -la)')
+    expect(shortArgs('{"pattern":"*.ts","path":"src"}')).toBe(' (*.ts)')
+  })
+
+  it('falls back to the first string value', () => {
+    expect(shortArgs('{"note":"ship it","count":3}')).toBe(' (ship it)')
+  })
+
+  it('returns nothing for unidentifying arguments', () => {
+    expect(shortArgs('{}')).toBe('')
+    expect(shortArgs('{"count":3}')).toBe('')
+    expect(shortArgs('not json')).toBe('')
+    expect(shortArgs('42')).toBe('')
+  })
+
+  it('truncates a long argument and sanitizes control characters', () => {
+    expect(shortArgs(JSON.stringify({ command: 'a'.repeat(60) }))).toBe(` (${'a'.repeat(40)}…)`)
+    expect(shortArgs('{"command":"git\\u001b[31m"}')).toBe(' (git\\x1b[31m)')
   })
 })

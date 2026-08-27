@@ -7,11 +7,14 @@
 
 import {
   Editor,
+  Loader,
   ScrollView,
-  Text,
   VStack,
   matchesKey,
+  truncateToWidth,
+  visibleWidth,
   type Component,
+  type LoaderIndicatorOptions,
   type ViewportTUI,
 } from '@earendil-works/pi-tui'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -22,10 +25,11 @@ import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { TerminalAutocomplete } from './autocomplete.ts'
 import type { AutocompleteOptions } from './autocomplete.ts'
 import { displayLine } from './display-text.ts'
+import { composeColdOpen } from './header.ts'
 import type { PanelHost } from './questions.ts'
 import { renderStatus } from './status.ts'
 import type { StatusGoal, StatusPlanMode } from './status.ts'
-import type { Palette } from './theme.ts'
+import type { ColorDepth, Palette } from './theme.ts'
 import { Transcript } from './transcript.ts'
 import { TranscriptView, type ToolPresenter } from './view.ts'
 
@@ -37,6 +41,8 @@ export interface ShellOptions {
   agent: Agent
   /** The styles to draw with. */
   palette: Palette
+  /** The color depth the palette draws at, if any. */
+  colorDepth?: ColorDepth | undefined
   /** The tool-view lookups the transcript uses. */
   presenter: ToolPresenter
   /** The slash-command registry, when the composition mounts one. */
@@ -72,6 +78,24 @@ export interface ShellOptions {
 /** The editor's placeholder-free border styling. */
 const EDITOR_PADDING_X = 1
 
+/** The footer's spinner frames while a turn runs. */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+/** The footer's spinner cadence in milliseconds. */
+const SPINNER_INTERVAL_MS = 80
+
+/** The editor's placeholder, shown dim while the input is empty. */
+const EDITOR_PLACEHOLDER = '/ for commands'
+
+/** The prompt marker that prefixes the editor's input row. */
+const PROMPT_MARKER = '›'
+
+/** Editor columns kept usable before the prompt gutter may take any width. */
+const MIN_EDITOR_COLUMNS = 8
+
+/** A style that adds nothing, for footer fields the palette already styled. */
+const IDENTITY_STYLE = (text: string): string => text
+
 /**
  * Route one submitted line: a slash command the registry knows runs as a
  * command, and everything else is conversation.
@@ -95,7 +119,11 @@ export class TerminalShell implements PanelHost {
   private readonly transcript = new Transcript()
   private readonly view: TranscriptView
   private readonly editor: Editor
-  private readonly status = new Text('', EDITOR_PADDING_X, 0)
+  private readonly inputRow: Component
+  private readonly status: Loader
+  private readonly runningIndicator: LoaderIndicatorOptions
+  private readonly idleIndicator: LoaderIndicatorOptions
+  private statusRunning: boolean | undefined
   private readonly panels = new Set<Component>()
   private turnStartedAt: number | undefined
   private contextWindow: number | undefined
@@ -116,6 +144,14 @@ export class TerminalShell implements PanelHost {
     })
     this.view.reasoning = options.showReasoning
     this.view.layout = { headLines: options.headLines, tailLines: options.tailLines, expanded: false }
+    // The run state rides the indicator — a spinner while a turn runs, a
+    // green dot while idle — so the footer reads the state before the words.
+    this.runningIndicator = {
+      frames: SPINNER_FRAMES.map(frame => options.palette.warn(frame)),
+      intervalMs: SPINNER_INTERVAL_MS,
+    }
+    this.idleIndicator = { frames: [options.palette.success('●')] }
+    this.status = new Loader(options.tui, options.palette.warn, IDENTITY_STYLE, '', this.idleIndicator)
     this.editor = new Editor(options.tui, {
       borderColor: options.palette.dim,
       selectList: {
@@ -127,6 +163,15 @@ export class TerminalShell implements PanelHost {
       },
     }, { paddingX: EDITOR_PADDING_X })
     this.editor.onSubmit = (text: string) => { void this.submit(text) }
+    // The prompt marker sits in a gutter beside the editor's input row; while
+    // the input is empty it reads as a dim placeholder naming what the reader
+    // can do. The gutter is sized from the terminal width so a narrow terminal
+    // keeps a usable editor, and drops the gutter entirely below the floor.
+    this.inputRow = {
+      render: (width: number) => this.renderInputRow(width),
+      invalidate: () => { this.editor.invalidate() },
+    }
+    this.editor.onChange = () => { this.options.tui.requestRender() }
     const autocomplete = options.autocomplete
     if (autocomplete !== undefined) {
       this.editor.setAutocompleteProvider(new TerminalAutocomplete({
@@ -148,7 +193,7 @@ export class TerminalShell implements PanelHost {
         minSize: 1,
       },
       {
-        component: new VStack([this.editor, this.status]),
+        component: new VStack([this.inputRow, this.status]),
         basis: 'auto',
         shrink: 1,
         minSize: 1,
@@ -156,6 +201,22 @@ export class TerminalShell implements PanelHost {
     ]))
     tui.setFocus(this.editor)
     this.refreshStatus()
+  }
+
+  /**
+   * Seed the cold-open header over an empty transcript; a resumed one keeps
+   * its own first entry.
+   */
+  seedColdOpen(): void {
+    this.transcript.seedHeader(composeColdOpen({
+      provider: this.route.provider,
+      model: this.route.model,
+      permissionPreset: this.options.permissionPreset?.(),
+      cwd: this.options.agent.session.header.cwd ?? process.cwd(),
+      depth: this.options.colorDepth,
+      columns: this.options.tui.terminal.columns,
+      rows: this.options.tui.terminal.rows,
+    }, this.options.palette))
   }
 
   /**
@@ -180,8 +241,13 @@ export class TerminalShell implements PanelHost {
   refreshStatus(): void {
     const agent = this.options.agent
     const measurement = this.options.tokenMeter?.measure(agent.session)
-    this.status.setText(renderStatus({
-      running: agent.status === 'running',
+    const running = agent.status === 'running'
+    if (this.statusRunning !== running) {
+      this.statusRunning = running
+      this.status.setIndicator(running ? this.runningIndicator : this.idleIndicator)
+    }
+    this.status.setMessage(renderStatus({
+      running,
       provider: this.route.provider,
       model: this.route.model,
       elapsedMs: this.turnStartedAt === undefined ? 0 : Date.now() - this.turnStartedAt,
@@ -194,6 +260,47 @@ export class TerminalShell implements PanelHost {
       permissionPreset: this.options.permissionPreset?.(),
     }, this.options.palette))
     this.options.tui.requestRender()
+  }
+
+  /** Stop the footer's animation; the screen effect calls this on teardown. */
+  stopStatus(): void {
+    this.status.stop()
+  }
+
+  /**
+   * Compose the editor's input row with a prompt gutter beside it. The gutter
+   * carries the `›` marker, and while the input is empty and no menu is open
+   * it widens into a dim placeholder naming what the reader can do; once the
+   * reader types or opens a menu it narrows to the marker so the editor and
+   * its inline menu keep their width. The gutter drops out entirely on a
+   * terminal too narrow to keep the editor usable beside it.
+   * @param width - the row's available width in columns.
+   * @returns the composed lines.
+   */
+  private renderInputRow(width: number): string[] {
+    const palette = this.options.palette
+    const marker = palette.user(PROMPT_MARKER)
+    const markerGutter = visibleWidth(`${PROMPT_MARKER} `)
+    let gutter = 0
+    let content = ''
+    if (this.editor.getText() === '' && !this.editor.isShowingAutocomplete()) {
+      const full = visibleWidth(`${PROMPT_MARKER} ${EDITOR_PLACEHOLDER}`)
+      const available = Math.min(full, width - MIN_EDITOR_COLUMNS)
+      if (available >= markerGutter) {
+        gutter = available
+        content = truncateToWidth(`${marker} ${palette.dim(EDITOR_PLACEHOLDER)}`, gutter)
+      }
+    }
+    if (gutter === 0 && width - MIN_EDITOR_COLUMNS >= markerGutter) {
+      gutter = markerGutter
+      content = marker
+    }
+    if (gutter === 0) return this.editor.render(width)
+    content += ' '.repeat(Math.max(0, gutter - visibleWidth(content)))
+    const editorLines = this.editor.render(Math.max(1, width - gutter))
+    const blank = ' '.repeat(gutter)
+    const markerRow = editorLines.length >= 2 ? 1 : 0
+    return editorLines.map((line, index) => (index === markerRow ? content : blank) + line)
   }
 
   /**

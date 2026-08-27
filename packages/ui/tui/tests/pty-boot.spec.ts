@@ -101,9 +101,9 @@ function plain(raw: string): string {
  * @param ready - the condition to poll.
  * @param timeoutMs - how long to wait before failing.
  */
-async function when(ready: () => boolean, timeoutMs: number): Promise<void> {
+async function when(ready: () => boolean | Promise<boolean>, timeoutMs: number): Promise<void> {
   const startedAt = Date.now()
-  while (!ready()) {
+  while (!(await ready())) {
     if (Date.now() - startedAt > timeoutMs) throw new Error('condition did not hold in time')
     await new Promise(resolve => setTimeout(resolve, 50))
   }
@@ -437,7 +437,7 @@ describe('the /model command under a real PTY', () => {
       // the request count has not moved.
       const requestCount = (): number => server?.requests.length ?? 0
       const beforeFooter = requestCount()
-      const footerNamed = (): boolean => harness.snapshot()
+      const footerNamed = async (): Promise<boolean> => (await harness.snapshot())
         .split('\n')
         .slice(-4)
         .some(line => line.includes('deepseek-official/deepseek-v4-pro'))
@@ -597,7 +597,7 @@ describe('the /model command under a real PTY', () => {
       await new Promise(resolve => setTimeout(resolve, 500))
       // No candidate row ever drew: the only route ids this screen could have
       // shown are the catalog's, and none is present.
-      expect(harness.snapshot()).not.toContain('v4-pro')
+      expect(await harness.snapshot()).not.toContain('v4-pro')
       // No invisible list captured the keyboard: typed keys reach the editor.
       harness.type('q')
       await harness.waitFor('q', TURN_TIMEOUT_MS)

@@ -35,7 +35,7 @@ import { childDisplayName, childRunning, type MenuSkill, type RunningChild } fro
 import { helpText } from './command-help.ts'
 import { runModelCommand } from './model-picker.ts'
 import { TerminalQuestions } from './questions.ts'
-import { createPalette } from './theme.ts'
+import { createPalette, detectColorDepth, type ColorDepth } from './theme.ts'
 import { TerminalShell, paneTitle } from './shell.ts'
 import type { ToolOutcome } from './transcript.ts'
 import type { ToolPresenter } from './view.ts'
@@ -81,6 +81,12 @@ export interface Config {
   session: string
   /** Whether to style output; `false` renders the same layout without SGR sequences. */
   color?: boolean
+  /**
+   * The color depth to draw at. `auto` reads the terminal's advertised
+   * capability; the other values pin one rung of the degradation ladder.
+   * Ignored when `color` is `false`.
+   */
+  colorDepth?: 'auto' | ColorDepth | 'none'
   /** Lines kept at the head of a folded tool-card body. */
   headLines?: number
   /** Lines kept at the tail of a folded tool-card body. */
@@ -98,6 +104,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   session: z.string().required(),
   color: z.boolean().default(true),
+  colorDepth: z.union(['auto', 'truecolor', '256', '16', 'none'] as const).default('auto'),
   headLines: z.natural().default(DEFAULT_HEAD_LINES),
   tailLines: z.natural().default(DEFAULT_TAIL_LINES),
   showReasoning: z.boolean().default(false),
@@ -110,6 +117,8 @@ export const Config: z<Config> = z.object({
 export interface ResolvedConfig {
   /** Whether to style output. */
   color: boolean
+  /** The color depth to draw at, before the terminal environment is read. */
+  colorDepth: 'auto' | ColorDepth | 'none'
   /** Lines kept at the head of a folded tool-card body. */
   headLines: number
   /** Lines kept at the tail of a folded tool-card body. */
@@ -133,12 +142,33 @@ export interface ResolvedConfig {
 export function resolveTerminalConfig(config: Config): ResolvedConfig {
   return {
     color: config.color ?? true,
+    colorDepth: config.colorDepth ?? 'auto',
     headLines: config.headLines ?? DEFAULT_HEAD_LINES,
     tailLines: config.tailLines ?? DEFAULT_TAIL_LINES,
     showReasoning: config.showReasoning ?? false,
     agentWaitTimeoutMs: config.agentWaitTimeoutMs ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS,
     maxSuggestions: config.maxSuggestions ?? DEFAULT_MAX_SUGGESTIONS,
   }
+}
+
+/**
+ * Resolve the color depth the palette draws at. A pinned depth wins when
+ * color is on; `auto` reads the terminal environment; `none` and a colorless
+ * palette both yield no depth. The environment is read here, at the one place
+ * a palette is built, rather than sniffed inside the palette itself.
+ * @param color - whether to emit SGR sequences at all.
+ * @param colorDepth - the configured depth or `auto`.
+ * @param env - the terminal environment.
+ * @returns the depth to draw at, or `undefined` for a colorless palette.
+ */
+export function resolveColorDepth(
+  color: boolean,
+  colorDepth: 'auto' | ColorDepth | 'none',
+  env: { COLORTERM?: string | undefined; TERM?: string | undefined },
+): ColorDepth | undefined {
+  if (!color || colorDepth === 'none') return undefined
+  if (colorDepth === 'auto') return detectColorDepth(env)
+  return colorDepth
 }
 
 /**
@@ -323,7 +353,8 @@ async function start(ctx: Context, config: Config): Promise<void> {
   const agent = await whenAgent(ctx, SessionId(config.session), settings.agentWaitTimeoutMs)
   if (agent === undefined) return
 
-  const palette = createPalette(settings.color)
+  const depth = resolveColorDepth(settings.color, settings.colorDepth, process.env)
+  const palette = createPalette(settings.color, depth ?? '16')
   const defaultRoute = ctx.get('agentDefaultModel')?.currentSelection()
   // The selection is agent-scoped state this front door owns: it fills the
   // persona's `{{provider}}`/`{{model}}` variables and routes each request.
@@ -344,6 +375,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
     tui,
     agent,
     palette,
+    colorDepth: depth,
     presenter: createPresenter(ctx, agent),
     commands,
     tokenMeter: ctx.get('tokenMeter'),
@@ -389,7 +421,10 @@ async function start(ctx: Context, config: Config): Promise<void> {
     tui.start()
     shell.start()
     terminal.setTitle(paneTitle(shell.model))
-    yield () => { tui.stop() }
+    yield () => {
+      shell.stopStatus()
+      tui.stop()
+    }
   }, 'dsh-tui.screen')
   /** Restate the pane title after every route change the shell knows about. */
   const syncTitle = (): void => { terminal.setTitle(paneTitle(shell.model)) }
@@ -399,6 +434,10 @@ async function start(ctx: Context, config: Config): Promise<void> {
   // request/context restates the route the session actually used last, so the
   // footer and pane title name it rather than the launch pin.
   for (const event of agent.session.events) shell.observe(event)
+  // Seed the cold-open header only when the replay left nothing to show: a
+  // resumed session keeps its own first entry, and the header scrolls away
+  // with the transcript after the first turn.
+  shell.seedColdOpen()
   shell.refreshStatus()
   syncTitle()
 

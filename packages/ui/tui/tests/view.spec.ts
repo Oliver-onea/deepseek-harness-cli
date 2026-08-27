@@ -37,6 +37,43 @@ describe('TranscriptView', () => {
     expect(viewOver([{ kind: 'user', text: 'hello' }]).render(40)).toEqual(['› hello', ''])
   })
 
+  it('marks the assistant first line and hangs the turn under it', () => {
+    const lines = viewOver([{ kind: 'assistant', text: 'one two three four five six seven', streaming: false }]).render(24)
+    expect(lines[0]).toMatch(/^◆ /u)
+    expect(lines[1]).toMatch(/^ {2}\S/u)
+  })
+
+  it('styles the assistant marker with the palette accent', () => {
+    const transcript = new Transcript()
+    const items = transcript.entries as TranscriptEntry[]
+    items.push({ kind: 'assistant', text: 'answer', streaming: false })
+    const view = new TranscriptView(transcript, { palette: createPalette(true, 'truecolor'), presenter: presenter() })
+    expect(view.render(40)[0]).toContain('\x1b[38;2;77;107;254m◆\x1b[39m')
+  })
+
+  it('opens a blank line before each human and assistant turn', () => {
+    const lines = viewOver([
+      { kind: 'notice', tone: 'info', text: 'note' },
+      { kind: 'user', text: 'hello' },
+      { kind: 'assistant', text: 'answer', streaming: false },
+    ]).render(40).map(line => line.replace(/\s+$/u, ''))
+    expect(lines).toEqual(['note', '', '', '› hello', '', '', '◆ answer', ''])
+  })
+
+  it('keeps the single separator before the first turn and after the header', () => {
+    expect(viewOver([{ kind: 'user', text: 'first' }]).render(40)).toEqual(['› first', ''])
+    const afterHeader = viewOver([
+      { kind: 'header', lines: ['whale'] },
+      { kind: 'user', text: 'next' },
+    ]).render(40)
+    expect(afterHeader).toEqual(['whale', '', '› next', ''])
+  })
+
+  it('draws the seeded cold-open header lines as they were composed', () => {
+    const lines = viewOver([{ kind: 'header', lines: ['whale art', 'DeepSeek Harness'] }]).render(40)
+    expect(lines).toEqual(['whale art', 'DeepSeek Harness', ''])
+  })
+
   it('renders assistant text as markdown', () => {
     const lines = viewOver([{ kind: 'assistant', text: '# Title', streaming: false }]).render(40)
     expect(lines.join('\n')).toContain('Title')
@@ -68,7 +105,9 @@ describe('TranscriptView', () => {
       presentCall: () => ({ card: 'generic', title: 'Run ls' }),
       presentResult: () => ({ card: 'generic', title: 'Ran ls' }),
     })
-    expect(view.render(40)[0]).toBe('✓ Ran ls')
+    const lines = view.render(40)
+    expect(lines[0]).toBe('✓ Run ls')
+    expect(lines[1]).toBe('╰ Ran ls')
   })
 
   it('leaves a running card without a result lookup', () => {

@@ -134,7 +134,7 @@ function stamp(createdAt: number): string {
  * @param path - the absolute working directory a session was created in.
  * @returns the path with its home prefix collapsed.
  */
-function collapseHome(path: string): string {
+export function collapseHome(path: string): string {
   const home = homedir()
   if (path === home) return '~'
   return path.startsWith(`${home}${sep}`) ? `~${path.slice(home.length)}` : path

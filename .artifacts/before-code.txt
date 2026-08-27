@@ -1,0 +1,6 @@
+[38;2;77;107;254m◆[39m Here is some code:
+
+  [2m```ts[22m
+    [38;2;167;139;250mconst x = "hello";[39m
+    [38;2;167;139;250mfunction test() { return 1; }[39m
+  [2m```[22m

@@ -136,16 +136,16 @@ export function formatPlanMode(planMode: StatusPlanMode): string | undefined {
 }
 
 /**
- * Compose the footer line.
+ * Compose the footer line. The run state itself is carried by the footer's
+ * indicator — a spinner while a turn runs, a green dot while idle — so the
+ * state word here stays unstyled.
  * @param input - the current session state.
  * @param palette - the styles to draw with.
  * @returns the footer text, already normalized for the terminal.
  */
 export function renderStatus(input: StatusInput, palette: Palette): string {
   const fields: string[] = []
-  fields.push(input.running
-    ? palette.warn(`working ${formatElapsed(input.elapsedMs)}`)
-    : palette.success('ready'))
+  fields.push(input.running ? `working ${formatElapsed(input.elapsedMs)}` : 'ready')
   if (input.goal !== undefined) fields.push(palette.dim(formatGoal(input.goal)))
   const planMode = input.planMode === undefined ? undefined : formatPlanMode(input.planMode)
   if (planMode !== undefined) fields.push(palette.warn(planMode))
@@ -155,8 +155,9 @@ export function renderStatus(input: StatusInput, palette: Palette): string {
   const plan = formatPlan(input.todos)
   if (plan !== undefined) fields.push(palette.dim(plan))
   if (input.queued > 0) fields.push(palette.warn(`${input.queued} queued`))
-  // `ctrl+c` is the one interrupt that always holds: `esc` first dismisses
-  // an open menu, so the running hint names the guaranteed key.
-  fields.push(palette.dim(input.running ? 'ctrl+c interrupt' : '/help  ctrl+c exit'))
+  // The interrupt hint belongs to the running turn, where it applies; the
+  // idle footer pins nothing, since the editor's own placeholder carries the
+  // standing key hints.
+  if (input.running) fields.push(palette.dim('ctrl+c interrupt'))
   return fields.join(palette.dim(' · '))
 }
