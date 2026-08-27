@@ -46,6 +46,7 @@ exports[`dsh terminal journey snapshots > /help lists the live command registry 
      ▀▀▀█████▀▀
 
 /compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
@@ -55,7 +56,6 @@ task
 /permission <preset> — Switch the permission preset (sandbox mode + approval policy)
 /plan [off|message] — Enter or leave plan mode
 /quit — Leave the terminal session
-
 
 
 
@@ -310,6 +310,7 @@ exports[`dsh terminal journey snapshots > slash menu opens, filters, and dispatc
      ▀▀▀█████▀▀
 
 /compact — Compact older conversation history
+/credential <REF> [<value>] — show or store a credential through the credentials service
 /exit — Leave the terminal session
 /feedback <text> — record feedback about this session
 /goal [<objective>|clear|edit <objective>|pause|resume] — set or view the goal for a long-running
@@ -319,7 +320,6 @@ task
 /permission <preset> — Switch the permission preset (sandbox mode + approval policy)
 /plan [off|message] — Enter or leave plan mode
 /quit — Leave the terminal session
-
 
 
 
