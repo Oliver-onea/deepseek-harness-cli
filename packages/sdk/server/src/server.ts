@@ -13,14 +13,20 @@ import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-user-approval'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
+  ApprovalRequestParams,
   InitializeParams,
   InitializeResult,
   JsonRpcTransportPeer,
   SessionEventNotification,
+  SessionInterruptParams,
+  SessionInterruptResult,
   SessionPromptParams,
   SessionPromptResult,
+  SessionSteerParams,
+  SessionSteerResult,
   SubagentFinishedNotification,
   SubagentStartedNotification,
 } from '@deepseek-ai/dsh-sdk-protocol'
@@ -38,6 +44,11 @@ function subagentParentOf(carrier: Scoped<SubagentRuntime>): Agent {
 export interface HarnessSdkJsonRpcServerOptions {
   /** Report max-token termination as an accepted result instead of an infrastructure error. */
   maxTokensAsSuccess?: boolean
+}
+
+/** Whether `value` is a plain JSON object (the wire-boundary shape probe). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function successStatus(reason: string, options: HarnessSdkJsonRpcServerOptions): 'ok' | 'error' {
@@ -101,6 +112,24 @@ export class HarnessSdkJsonRpcServer {
       }
       transport.notify('subagent.finished', payload)
     }))
+    // Approval answerer: forward questions for THIS server's agents to the SDK
+    // client as a server→client request; every other agent delegates. A client
+    // that answers nothing (no handler, error response, transport loss) rejects
+    // this listener, which the approval service's fail-closed containment
+    // settles as 'unavailable'.
+    this.disposers.push(ctx.on('approval/request', async (req, next) => {
+      const rec = [...this.sessions.values()].find(candidate => candidate.handle.agent === req.agent)
+      if (rec === undefined) return next()
+      const params: ApprovalRequestParams = {
+        sessionId: String(req.agent.session.id),
+        toolName: req.toolName,
+        ...req.callId !== undefined ? { callId: String(req.callId) } : {},
+        ...req.reason !== undefined ? { reason: req.reason } : {},
+      }
+      const result = await transport.request('approval/request', params, req.signal)
+      // Wire boundary: any answer other than the one grant fails closed.
+      return isRecord(result) && result.outcome === 'allowed-once' ? 'allowed-once' : 'rejected'
+    }))
   }
 
   /**
@@ -140,6 +169,59 @@ export class HarnessSdkJsonRpcServer {
     const message = createUserMessage({ content: params.contentBlocks, source: { kind: 'user' } })
     rec.handle.agent.followup(message)
     return { messageId: message.id }
+  }
+
+  /**
+   * Splice one steering message into a known SDK session: it joins the running
+   * turn at its next step boundary, or opens the next turn when the session is
+   * idle (`Agent.steer`'s wakeup semantics).
+   * @param params - target session and steering content.
+   * @returns the durable message identity.
+   */
+  steer(params: SessionSteerParams): SessionSteerResult {
+    if (typeof params.sessionId !== 'string') {
+      throw new TypeError('session/steer sessionId must be a string')
+    }
+    // Like interrupt, steer never creates the session: steering targets work
+    // the runtime already owns, and a stale or mistyped id must fail loud.
+    const rec = this.sessions.get(params.sessionId)
+    if (rec === undefined) {
+      throw new Error(`unknown SDK session for session/steer: ${params.sessionId}`)
+    }
+    if (this.ctx.agents.get(rec.handle.agent.id) !== rec.handle.agent) {
+      throw new Error(`session agent was disposed outside the server: ${params.sessionId}`)
+    }
+    const message = createUserMessage({ content: params.contentBlocks, source: { kind: 'user' } })
+    rec.handle.agent.steer(message)
+    return { messageId: message.id }
+  }
+
+  /**
+   * Abort one known SDK session's active turn through its live agent. Queued
+   * and steering work is cleared unless `keepInbox` preserves it (preserved
+   * work stays parked until a later waking prompt claims it); with no active
+   * activity the cancel is a no-op and does not arm later work.
+   * @param params - target session and queued-work policy.
+   * @returns an empty acceptance receipt; the abort is observed through
+   * `session.event` and `session.status`.
+   */
+  interrupt(params: SessionInterruptParams): SessionInterruptResult {
+    // Wire boundary: params arrive as unchecked JSON and are validated before
+    // any session state is touched.
+    if (typeof params.sessionId !== 'string') {
+      throw new TypeError('session/interrupt sessionId must be a string')
+    }
+    if (params.keepInbox !== undefined && typeof params.keepInbox !== 'boolean') {
+      throw new TypeError('session/interrupt keepInbox must be a boolean when given')
+    }
+    const rec = this.sessions.get(params.sessionId)
+    // Unlike prompt, interrupt never creates the session: stopping a mistyped
+    // id must fail loud, not mint an idle agent.
+    if (rec === undefined) {
+      throw new Error(`unknown SDK session for session/interrupt: ${params.sessionId}`)
+    }
+    rec.handle.agent.cancel({ kind: 'user' }, { keepInbox: params.keepInbox })
+    return {}
   }
 
   /**
@@ -193,6 +275,10 @@ export class HarnessSdkJsonRpcServer {
         return this.initialize(params as unknown as InitializeParams)
       case 'session/prompt':
         return this.prompt(params as unknown as SessionPromptParams)
+      case 'session/steer':
+        return this.steer(params as unknown as SessionSteerParams)
+      case 'session/interrupt':
+        return this.interrupt(params as unknown as SessionInterruptParams)
       case 'shutdown':
         return this.shutdown()
       default:

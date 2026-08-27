@@ -25,9 +25,15 @@ console.log(result.finalResponse)
 
 `run(input, { sessionId?, onNotification? })` 拥有一个活动区间：它将提示词排入队列，等待其 `MessageId` 出现在持久的 `agent/inbox/spliced` 回执中，然后持续收集到整个 agent 下一次进入 `idle`。它返回 `RunResult { sessionId, finalResponse, events, notifications }`。`finalResponse` 是该区间内根会话最后提交的助手文本，并非因果上归属于该提示词的响应；steering（中途引导）、注入的上下文和其他排队工作都可能在 idle 前参与其中。`events` 包含根会话事件，`notifications` 还包含通过 `subagent.started` 发现的后代，均按协议传输顺序排列。结果不携带提示词级状态或轮次原因。传输丢失、超时和协议违例会导致 Promise 被拒绝；模型结果仍可在事件流中观察，但不会归属于某一输入。
 
+`session(id).steer(input)` 把 steering（中途引导）内容拼入该会话：运行中的轮次在下一个 step 边界消费它，空闲会话以它开启下一个轮次；运行时不认识的会话会以指明该 id 的协议错误拒绝。它返回被拼入的消息 id；消费本身通过通知流观察。
+
+`session(id).interrupt({ keepInbox? })` 中止该会话的活跃轮次：排队与 steering 工作会被丢弃，除非以 `keepInbox: true` 保留（被保留的工作保持停放状态，直到后续唤醒提示词将其认领）；空闲会话接受该中断为无操作；运行时不认识的会话会以指明该 id 的协议错误拒绝。中止本身通过通知流观察，而非返回值。
+
+审批（approval）问题以协议中唯一的 server→client 请求到达：构造选项的 `onApproval`（或协议层的 `client.onApprovalRequest(handler)`）安装决定它们的处理器。没有处理器时，运行时的问题得到错误响应，工具调用以失败关闭收场；抛出异常的处理器与畸形的运行时回答同样以失败关闭收场。处理器收到会话 id、工具名、调用 id 与提问方理由，`{ outcome: 'allowed-once' }` 是它唯一能给出的授权。`approval/asked`/`approval/decided` 审计对与其他事件一样随 `session.event` 流送达。
+
 ## HarnessClient
 
-自有运行 API 之下的协议客户端：显式 `start()`/`initialize()`/`prompt()`/`request()`/`close()`，外加通知订阅。`prompt()` 在运行时接受排队消息后立即返回该消息的 ID，绝不等待 agent 活动。`subscribe(filter?)` 返回 `NotificationSubscription`（可等待的 `next()`、非阻塞 `tryNext()`、异步迭代）；`subscribeSessionTree(id)` 把范围限定到一个会话及从 `subagent.started` 血缘边发现的后代——运行时对上下文内每个会话都发通知，范围限定在客户端完成，与 Python SDK 完全一致。本包导出有明确类型的错误：`JsonRpcResponseError`（协议错误响应，保留 code/data）、`RequestTimeoutError`（配置的时限已到）、`SdkProtocolError`（响应超出文档化协议）、`TransportClosedError`（运行时已消失——消息携带退出码与有界 stderr 尾部）。
+自有运行 API 之下的协议客户端：显式 `start()`/`initialize()`/`prompt()`/`steer()`/`interrupt()`/`request()`/`close()`，外加通知订阅。`prompt()` 在运行时接受排队消息后立即返回该消息的 ID，绝不等待 agent 活动。`steer(sessionId, contentBlocks)` 与 `interrupt(sessionId, { keepInbox? })` 和上述会话句柄捷径语义相同。`subscribe(filter?)` 返回 `NotificationSubscription`（可等待的 `next()`、非阻塞 `tryNext()`、异步迭代）；`subscribeSessionTree(id)` 把范围限定到一个会话及从 `subagent.started` 血缘边发现的后代——运行时对上下文内每个会话都发通知，范围限定在客户端完成，与 Python SDK 完全一致。本包导出有明确类型的错误：`JsonRpcResponseError`（协议错误响应，保留 code/data）、`RequestTimeoutError`（配置的时限已到）、`SdkProtocolError`（响应超出文档化协议）、`TransportClosedError`（运行时已消失——消息携带退出码与有界 stderr 尾部）。
 
 `close()` 先请求协议 `shutdown`（受 `shutdownTimeoutMs` 约束，默认 1000 毫秒），然后走 stdin-EOF → SIGTERM → SIGKILL 阶梯（`disposeEofGraceMs` 默认 6000，`disposeGraceMs` 默认 3000）直到进程真正退出。该阶梯为本客户端私有：它运行在任何 harness 上下文之外，无法搭乘 [`dsh-subprocess`](../../subprocess/README.md) 服务——即该 seam 所记录的 SDK 托管传输例外。幂等，已关闭的客户端拒绝复用。
 
@@ -44,6 +50,6 @@ console.log(result.finalResponse)
 ## 已知限制与暂缓事项
 
 - **无捆绑运行时解析**——调用方显式指定运行时可执行文件；打包可执行文件的发现留在 Python 侧，直到出现 TypeScript 发行版消费方。
-- **无轮次中取消**——协议层没有提示词取消方法；放弃轮次意味着关闭运行时（见协议的 [已知限制](../protocol/README.md)）。
-- **没有逐提示词结果或取消**——低层 `prompt()` 只返回入队回执；高层 `run()` 负责从回执收集到 idle，放弃该过程意味着关闭运行时。
-- **客户端→服务端通知与服务端→客户端请求**在协议两端都未实现；传输层为未来审批流保留了承载能力。
+- **没有逐提示词结果**——低层 `prompt()` 只返回入队回执，高层 `run()` 负责从回执收集到 idle；`interrupt` 停止会话的工作，但不把结果归属于某一提示词。
+- **Python SDK 差距**——`steer` 与 `interrupt` 尚无 Python 对应方法，且只有 TypeScript 客户端应答 `approval/request`；设计孪生将随各自的改动获得（见协议的[已知限制](../protocol/README.md)）。
+- **客户端→服务端通知**在协议两端都未实现；传输层为未来的流保留了承载能力。

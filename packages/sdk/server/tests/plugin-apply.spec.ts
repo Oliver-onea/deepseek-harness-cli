@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import UserApproval from '@deepseek-ai/dsh-user-approval'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import * as jsonrpc from '../src/index.ts'
 
 /**
@@ -149,6 +151,32 @@ async function mockCompletionServer(): Promise<{ url: string; requests: unknown[
   return { url: `http://127.0.0.1:${address.port}`, requests }
 }
 
+/** SSE endpoint whose FIRST request streams one chunk then hangs; later requests complete. */
+async function mockHangingFirstCompletionServer(): Promise<{ url: string; requests: unknown[] }> {
+  const requests: unknown[] = []
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    let body = ''
+    request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+    request.on('end', () => {
+      requests.push(JSON.parse(body))
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: {"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":""}}]}\n\n')
+      // The first turn stays in flight so the approval ask lands inside an
+      // open turn; harness disposal destroys the socket.
+      if (requests.length === 1) return
+      response.write('data: {"choices":[{"delta":{"content":"done"}}]}\n\n')
+      response.write('data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\n')
+      response.write('data: [DONE]\n\n')
+      response.end()
+    })
+  })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no port')
+  return { url: `http://127.0.0.1:${address.port}`, requests }
+}
+
 describe('dsh-sdk-jsonrpc-server plugin apply', () => {
   it('serves initialize over the injected stdio pair', async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-init-'))
@@ -206,6 +234,150 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
         jsonrpc: '2.0',
         params: { sessionId: 'main', status: 'idle' },
       })
+    } finally {
+      await harness.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('answers session/interrupt over the wire and errors on unknown sessions', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-interrupt-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const harness = await mountPlugin(storageDir)
+    try {
+      harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
+      await harness.waitForFrame(frame => frame.id === 1, 'initialize response')
+      harness.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'fix it' }] },
+      })
+      await harness.waitForFrame(frame => frame.id === 2, 'prompt response')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status',
+      )
+
+      // The settled session accepts the interrupt as a no-op.
+      harness.send({ jsonrpc: '2.0', id: 3, method: 'session/interrupt', params: { sessionId: 'main' } })
+      const interrupt = await harness.waitForFrame(frame => frame.id === 3, 'interrupt response')
+      expect(interrupt).toEqual({ jsonrpc: '2.0', id: 3, result: {} })
+
+      // An unknown session id fails loud and names the id.
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'session/interrupt', params: { sessionId: 'ghost' } })
+      const unknown = await harness.waitForFrame(frame => frame.id === 4, 'unknown-session error response')
+      expect(unknown).toEqual({
+        jsonrpc: '2.0',
+        id: 4,
+        error: { code: -32603, message: 'unknown SDK session for session/interrupt: ghost' },
+      })
+    } finally {
+      await harness.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('answers session/steer over the wire and errors on unknown sessions', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-steer-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const harness = await mountPlugin(storageDir)
+    try {
+      harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
+      await harness.waitForFrame(frame => frame.id === 1, 'initialize response')
+      harness.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'fix it' }] },
+      })
+      await harness.waitForFrame(frame => frame.id === 2, 'prompt response')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status',
+      )
+
+      // An idle steer is Agent.steer's wakeup: it opens the next turn itself.
+      harness.send({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'session/steer',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'steered course' }] },
+      })
+      const steer = await harness.waitForFrame(frame => frame.id === 3, 'steer response')
+      expect(typeof (steer.result as { messageId?: unknown }).messageId).toBe('string')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status after the steered turn',
+      )
+      expect(llmServer.requests).toHaveLength(2)
+      const second = llmServer.requests[1] as { messages: unknown[] }
+      expect(JSON.stringify(second.messages)).toContain('steered course')
+
+      // An unknown session id fails loud and names the id.
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'session/steer', params: { sessionId: 'ghost', contentBlocks: [] } })
+      const unknown = await harness.waitForFrame(frame => frame.id === 4, 'unknown-session error response')
+      expect(unknown).toEqual({
+        jsonrpc: '2.0',
+        id: 4,
+        error: { code: -32603, message: 'unknown SDK session for session/steer: ghost' },
+      })
+    } finally {
+      await harness.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('asks the wire client over approval/request and settles its decision', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-approval-'))
+    const llmServer = await mockHangingFirstCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const harness = await mountPlugin(storageDir)
+    await harness.ctx.plugin(UserApproval)
+    try {
+      harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
+      await harness.waitForFrame(frame => frame.id === 1, 'initialize response')
+      harness.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'hang the turn open' }] },
+      })
+      await harness.waitForFrame(frame => frame.id === 2, 'prompt response')
+      await waitFor(() => llmServer.requests.length > 0 ? llmServer.requests.length : undefined, 'first model request')
+
+      // The turn hangs open, so the approval ask lands inside it. The ask
+      // travels the real ApprovalService waterfall into the server's
+      // answerer and out over the wire as a server→client request.
+      const agent = harness.ctx.agents.get(SessionId('main'))
+      if (agent === undefined) throw new Error('no live agent for session main')
+      const decision = harness.ctx.approval.request({ agent, toolName: 'bash', reason: 'escalation requested' })
+      const ask = await harness.waitForFrame(
+        frame => frame.method === 'approval/request',
+        'approval/request server-to-client request',
+      )
+      expect(ask.params).toMatchObject({ sessionId: 'main', toolName: 'bash', reason: 'escalation requested' })
+      harness.send({ jsonrpc: '2.0', id: ask.id, result: { outcome: 'allowed-once' } })
+      await expect(decision).resolves.toBe('allowed-once')
+
+      // A second ask whose client answer is a rejection fails closed. The
+      // frame poll matches only the NEW request id — waitForFrame finds the
+      // first historical match.
+      const second = harness.ctx.approval.request({ agent, toolName: 'bash' })
+      const askTwo = await harness.waitForFrame(
+        frame => frame.method === 'approval/request' && frame.id !== ask.id,
+        'second approval/request',
+      )
+      harness.send({ jsonrpc: '2.0', id: askTwo.id, result: { outcome: 'rejected' } })
+      await expect(second).resolves.toBe('rejected')
     } finally {
       await harness.dispose()
       await rm(storageDir, { recursive: true, force: true })

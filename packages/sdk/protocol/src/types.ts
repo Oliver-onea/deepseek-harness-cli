@@ -1,9 +1,11 @@
 /**
- * Named wire types for the DeepSeek Harness SDK runtime protocol: the three
- * request/result pairs and the four server-to-client notification payloads
- * exchanged over the newline-delimited JSON-RPC stdio transport. The server
- * plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share these shapes;
- * `serverInfo.name` stays the wire-stable `deepseek-harness-sdk-runtime`.
+ * Named wire types for the DeepSeek Harness SDK runtime protocol: the five
+ * client→server request/result pairs, the one server→client request/result
+ * pair (`approval/request`), and the four server-to-client notification
+ * payloads exchanged over the newline-delimited JSON-RPC stdio transport. The
+ * server plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share
+ * these shapes; `serverInfo.name` stays the wire-stable
+ * `deepseek-harness-sdk-runtime`.
  *
  * @module @deepseek-ai/dsh-sdk-protocol/types
  */
@@ -42,6 +44,64 @@ export interface SessionPromptParams {
 export interface SessionPromptResult {
   /** Identity of the queued user message. */
   messageId: string
+}
+
+/**
+ * Steer one SDK session: the content joins the running turn at its next step
+ * boundary, or opens the next turn when the session is idle.
+ */
+export interface SessionSteerParams {
+  /** The SDK-side session id; like `session/interrupt`, an unknown id fails instead of creating the session. */
+  sessionId: string
+  /** The steering content blocks, sent verbatim as the user message. */
+  contentBlocks: ContentBlock[]
+}
+
+/** Durable enqueue receipt for one steering message. */
+export interface SessionSteerResult {
+  /** Identity of the spliced `next-step` user message. */
+  messageId: string
+}
+
+/** Stop one SDK session's active turn, with explicit queued-work semantics. */
+export interface SessionInterruptParams {
+  /** The SDK-side session id; unlike `session/prompt`, an unknown id fails instead of creating the session. */
+  sessionId: string
+  /**
+   * Preserve queued and steering inbox items while the active turn aborts;
+   * preserved work stays parked until a later waking prompt claims it.
+   * Omission clears them (the `Agent.cancel` default), so a bare interrupt
+   * stops all pending work on the session.
+   */
+  keepInbox?: boolean
+}
+
+/**
+ * Acceptance receipt for `session/interrupt`: the session exists and the
+ * params were valid. The abort itself is observed through `session.event`
+ * and `session.status`, and an idle session accepts the interrupt as a no-op.
+ */
+export type SessionInterruptResult = Record<string, never>
+
+/** Server→client approval question: decide one pending tool action. */
+export interface ApprovalRequestParams {
+  /** The SDK-side session id whose agent awaits the decision. */
+  sessionId: string
+  /** The tool the question is about. */
+  toolName: string
+  /** The exact tool call being decided, when the asker had one. */
+  callId?: string
+  /** The asker's human-readable explanation of why it is asking. */
+  reason?: string
+}
+
+/**
+ * Client decision for one approval question. `'allowed-once'` is the only
+ * grant; every other value the server can observe (including an error
+ * response) fails closed.
+ */
+export interface ApprovalRequestResult {
+  outcome: 'allowed-once' | 'rejected'
 }
 
 /** Deployment-mapped SDK outcome: `ok` for an accepted result, `error` otherwise. */
@@ -101,5 +161,12 @@ export interface HarnessSdkNotificationMap {
 export interface HarnessSdkRequestMap {
   'initialize': { params: InitializeParams; result: InitializeResult }
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
+  'session/steer': { params: SessionSteerParams; result: SessionSteerResult }
+  'session/interrupt': { params: SessionInterruptParams; result: SessionInterruptResult }
   'shutdown': { params: undefined; result: Record<string, never> }
+}
+
+/** Server-to-client request methods with their param and result shapes. */
+export interface HarnessSdkServerRequestMap {
+  'approval/request': { params: ApprovalRequestParams; result: ApprovalRequestResult }
 }

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-14-bounded-cli-startup-refusals-and-option-terminators.md
+2026-08-14-bounded-cli-startup-refusals-and-option-terminators.md: 25a37efcf90293d2c74e677650dfea7820f5bccc
+2026-08-14-bounded-cli-startup-refusals-and-option-terminators.zh.md: 1660346e1d8604799cd46e31b59a57bcc2a424d9

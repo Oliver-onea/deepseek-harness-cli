@@ -7,6 +7,13 @@
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { ApprovalRequestParams, ApprovalRequestResult } from '@deepseek-ai/dsh-sdk-protocol'
+
+/**
+ * Handler for one server→client approval question; `'allowed-once'` is the
+ * only grant, and a throwing handler fails the question closed server-side.
+ */
+export type ApprovalRequestHandler = (request: ApprovalRequestParams) => Promise<ApprovalRequestResult>
 
 /** One server-to-client notification as received off the wire. */
 export interface HarnessNotification {
@@ -48,6 +55,12 @@ export interface HarnessClientOptions {
 export interface DeepSeekHarnessOptions {
   /** Launch spec for the runtime subprocess (command, args, cwd, env, timeouts). */
   launch: HarnessClientOptions
+  /**
+   * Handler for server→client approval questions, installed on the underlying
+   * client at construction; the runtime fails every approval closed without
+   * one. See {@link ApprovalRequestHandler}.
+   */
+  onApproval?: ApprovalRequestHandler
   /** Workspace cwd recorded on every SDK-created session (default: the launch cwd, else `process.cwd()`). */
   cwd?: string
   /** Provider route for SDK-created agents (default `deepseek-official`). */
@@ -68,6 +81,15 @@ export interface RunResult {
   events: SessionEvent[]
   /** Every notification for the root session and discovered descendants, in wire order. */
   notifications: HarnessNotification[]
+}
+
+/** Options for `HarnessClient.interrupt` and `HarnessSession.interrupt`. */
+export interface SessionInterruptOptions {
+  /**
+   * Preserve queued and steering inbox items; omitted clears them (the wire
+   * default). Preserved work stays parked until a later waking prompt claims it.
+   */
+  keepInbox?: boolean
 }
 
 /** Re-exported content-block alias so SDK callers need no extra import. */

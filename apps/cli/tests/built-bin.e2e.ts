@@ -310,11 +310,11 @@ function startStartupProfile(fixture: StartupFixture, args: readonly string[]) {
 }
 
 describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', () => {
-  it('requires --profile and rejects removed commands', async () => {
+  it('boots the default terminal profile and rejects removed commands', async () => {
     const bare = await runBuiltBin()
     expect(bare.code).toBe(1)
     expect(bare.stdout).toBe('')
-    expect(bare.stderr).toContain('--profile <name> is required')
+    expect(bare.stderr).toBe('dsh-tui: the terminal front door needs a TTY on both stdin and stdout; use the headless app for pipes and automation')
     const help = await runBuiltBin(['--help'])
     expect(help.code).toBe(0)
     expect(help.stdout).toContain('dsh --profile web')
@@ -388,6 +388,26 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
       expect(server.requests.length).toBeGreaterThan(0)
       expect(server.requests.every(request => request.path === '/chat/completions')).toBe(true)
       expect(JSON.stringify(server.requests.map(request => request.body))).toContain('answer from the published entry')
+
+      const flagServer = await startMockLlmServer({
+        sequence: ['success'],
+        apiKey,
+        successText: 'published headless profile reached the mock',
+      })
+      try {
+        const flagTask = await runBuiltBin(['--profile', 'headless', '--', '--help'], {
+          DSH_HOME: home,
+          DSH_TELEMETRY_DISABLED: '1',
+          DEEPSEEK_API_KEY: apiKey,
+          DEEPSEEK_BASE_URL: flagServer.baseURL,
+        })
+        expect(flagTask.code, flagTask.stderr).toBe(0)
+        expect(flagTask.stdout).toBe('published headless profile reached the mock')
+        expect(flagTask.stderr).toBe('')
+        expect(JSON.stringify(flagServer.requests.at(-1)?.body)).toContain('--help')
+      } finally {
+        await flagServer.close()
+      }
     } finally {
       await server.close()
       rmSync(home, { recursive: true, force: true })
@@ -410,8 +430,23 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
     try {
       const result = await runBuiltBin(['--profile', 'nope'], { DSH_HOME: home })
       expect(result.code).toBe(1)
-      expect(result.stderr).toContain('profile "nope" does not exist')
-      expect(result.stderr).toContain('dsh plugin --profile nope add')
+      expect(result.stderr).toBe('dsh: profile "nope" does not exist; create it with \'dsh plugin --profile nope add <package>\'')
+      expect(result.stderr).not.toContain('\n')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  it('reports a missing patch as one user-facing line', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-missing-patch-'))
+    const missing = join(home, 'missing.cordis.yml')
+    try {
+      const result = await runBuiltBin(['--profile', 'web', '--patch', missing], { DSH_HOME: home })
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain(`dsh: failed to read overlay ${missing}`)
+      expect(result.stderr).not.toContain('\n')
+      expect(result.stderr).not.toContain('at file:')
+      expect(result.stderr).not.toContain('Node.js v')
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

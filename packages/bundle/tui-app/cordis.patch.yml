@@ -1,0 +1,72 @@
+# The dsh-tui-app bundle patch: the full-screen terminal surface over the
+# dsh-base layer. Applied after dsh-base's insert; rows here override base rows
+# by id, with the profile's own cordis.patch.yml and any --patch overlays still
+# to come.
+#
+# A patch replaces the targeted row's whole `config`, so each row below
+# restates every key it owns.
+#
+# The tui-startup plugin injects `cmdlineArgs` and provides `tuiStartup` as an
+# ordinary Cordis service. The agent row and the terminal row inject that
+# service, so the Loader resolves their expressions only after it exists.
+# `dsh --help` provides no service, so neither an agent nor a screen is
+# composed and the process prints help and exits.
+#
+# The agent plane stays where dsh-base put it: this surface is single-session
+# and composes one agent process-wide, so it mounts no preset roster and the
+# base's tool, prompt, and delegation rows are the agent's own.
+
+# ── surface-specific values the base deliberately omits ─────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+      You are talking to a person in their terminal; keep answers short and skimmable, and
+      prefer doing the work over describing it.
+
+# The shared module-reload HMR row stays off: reloading a plugin under a live
+# screen would rebuild components the terminal is currently drawing.
+- id: hmr
+  disabled: true
+
+- id: tools
+  config:
+    # TEMPORARY workaround, shared with the Web surface: DSH_TOOLS_MODE
+    # (native|code|both) opts a whole dsh process into Code Mode while
+    # per-session tool-presentation selection is being designed; unset keeps
+    # the schema default (native).
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+- insert:
+    # Code Mode is a core execution capability, not a Web component.
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    # Ordinary provider for the parsed terminal flags. Its plugin-level
+    # injection waits for cmdlineArgs; no launcher metadata is needed.
+    - id: tui-startup
+      name: '@deepseek-ai/dsh-tui-app/startup'
+
+    # The screen. It attaches to the exact session the agent row below is
+    # configured with, and refuses to start without a TTY on both streams.
+    - id: tui
+      name: '@deepseek-ai/dsh-tui'
+      inject: [tuiStartup]
+      config:
+        session: !!js ctx.tuiStartup.session
+        color: !!js ctx.tuiStartup.color
+        task: !!js ctx.tuiStartup.task
+
+# ── the one agent this surface drives ───────────────────────────────────────
+#
+# The base leaves `agents: []` for surfaces that create sessions on request.
+# This one composes exactly one agent at startup, fresh or resumed, and the
+# startup provider owns which of the two it is.
+
+- id: agent-loop
+  inject: [tuiStartup]
+  config:
+    # A quoted scalar: the `!!js` tag is scalar-only, so the one-element list
+    # is the expression's value rather than a YAML sequence of expressions.
+    agents: !!js "[ctx.tuiStartup.agent]"

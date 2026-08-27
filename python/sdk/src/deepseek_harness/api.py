@@ -129,6 +129,29 @@ class Session:
         self.harness = harness
         self.id = session_id
 
+    def steer(self, input: str | list[JsonObject]) -> str:
+        """Steer this session: the content joins the running turn at its next step
+        boundary, or opens the next turn when the session is idle.
+
+        Args:
+            input: the steering message.
+
+        Returns:
+            the spliced message id.
+        """
+        content_blocks = normalize_input(input)
+        return self.harness.client.session_steer(self.id, content_blocks)
+
+    def interrupt(self, *, keep_inbox: bool = False) -> None:
+        """Interrupt this session's active turn.
+
+        Queued and steering work is cleared unless ``keep_inbox`` preserves it.
+
+        Args:
+            keep_inbox: preserve queued and steering inbox items.
+        """
+        self.harness.client.session_interrupt(self.id, keep_inbox=keep_inbox)
+
     def run(
         self,
         input: str | list[JsonObject],

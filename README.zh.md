@@ -17,6 +17,14 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 安装 `Node.js`，然后运行：
 
 ```sh
+npx @deepseek-ai/dsh
+```
+
+该命令会打开终端界面；`dsh "run the tests"` 会打开它并从该任务开始。详见[终端前门](packages/ui/tui/README.md)。
+
+如需改用浏览器界面：
+
+```sh
 npx @deepseek-ai/dsh web
 ```
 
@@ -31,7 +39,7 @@ git clone https://github.com/deepseek-ai/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build
-pnpm dsh web
+pnpm dsh
 ```
 
 ## 社区与支持

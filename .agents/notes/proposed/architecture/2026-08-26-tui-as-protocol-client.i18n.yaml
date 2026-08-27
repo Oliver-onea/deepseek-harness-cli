@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-26-tui-as-protocol-client.md
+2026-08-26-tui-as-protocol-client.md: 4b9260d211faa07d847cf7a6c96e44e1df2a3d64
+2026-08-26-tui-as-protocol-client.zh.md: c34c76f31b87f831011fc5405c7d47e2bd6614cf

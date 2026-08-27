@@ -730,7 +730,9 @@
       "entry": [
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts",
-        "tests/**/*.snapshot.ts"
+        "tests/**/*.snapshot.ts",
+        "tests/**/*.harness.ts",
+        "tests/fixtures/tui-journey/stage-subagent-child.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -776,6 +778,16 @@
     "packages/bundle/headless": {
       "ignoreDependencies": [
         "@deepseek-ai/dsh-code-runtime-worker-thread"
+      ]
+    },
+    "packages/bundle/tui-app": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-code-runtime-worker-thread"
+      ]
+    },
+    "packages/ui/tui": {
+      "ignoreDependencies": [
+        "node-pty"
       ]
     },
     "packages/bundle/web-app": {

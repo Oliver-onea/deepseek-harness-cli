@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DeepSeekHarness,
   HarnessClient,
@@ -239,6 +239,133 @@ describe('DeepSeekHarness', () => {
     }
     // After scope exit the runtime is closed: reuse fails loudly.
     await expect(captured.run('after')).rejects.toThrow(TransportClosedError)
+  })
+
+  it('settles a hung run when the session is interrupted mid-turn', async () => {
+    const harness = harnessWith({ FAKE_HANG_TURN: '1' })
+    await harness.start()
+    const session = harness.session('interruptible')
+    const watch = harness.client.subscribeSessionTree(session.id)
+    const running = session.run('long task')
+    // Deterministic ordering: the interrupt lands only after the runtime has
+    // accepted the prompt and reported the session running.
+    for (;;) {
+      const notification = await watch.next()
+      if (notification.method === 'session.status' && notification.params.status === 'running') break
+    }
+    await session.interrupt()
+    const result = await running
+    watch.close()
+
+    const turnEnd = result.events.find(event => event.type === 'turn/end')
+    expect(turnEnd?.type === 'turn/end' && turnEnd.data.reason.kind).toBe('aborted')
+    expect(result.finalResponse).toBe('')
+    await harness.close()
+  })
+})
+
+describe('HarnessClient steer', () => {
+  it('sends the steering content verbatim and returns the spliced message id', async () => {
+    const dir = await tempDir('sdk-client-steer-')
+    const recordFile = join(dir, 'steers.jsonl')
+    const harness = harnessWith({ FAKE_RECORD_STEER: recordFile })
+    const session = harness.session('steerable')
+    await session.run('seed the session')
+    const messageId = await session.steer('adjust course')
+    expect(messageId).toBeTypeOf('string')
+    await harness.close()
+
+    const records = (await readFile(recordFile, 'utf8')).trim().split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(records).toEqual([{
+      sessionId: 'steerable',
+      contentBlocks: [{ type: 'text', text: 'adjust course' }],
+    }])
+  })
+
+  it('rejects steering a session the runtime does not know', async () => {
+    const harness = harnessWith()
+    const failure = await harness.session('missing').steer('adjust').then(
+      () => { throw new Error('steer unexpectedly succeeded') },
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(JsonRpcResponseError)
+    expect((failure as JsonRpcResponseError).message).toContain('missing')
+    await harness.close()
+  })
+})
+
+describe('HarnessClient approval', () => {
+  it('answers server approval questions through the installed handler', async () => {
+    const dir = await tempDir('sdk-client-approval-')
+    const recordFile = join(dir, 'approval-responses.jsonl')
+    const asks: unknown[] = []
+    const harness = new DeepSeekHarness({
+      launch: fakeLaunch({ FAKE_APPROVAL_ASK: '1', FAKE_RECORD_APPROVAL_RESPONSE: recordFile }),
+      onApproval: async (request) => {
+        asks.push({ ...request })
+        return { outcome: 'allowed-once' }
+      },
+    })
+    cleanups.push(() => harness.close())
+    const result = await harness.run('needs approval')
+    expect(asks).toEqual([{ sessionId: result.sessionId, toolName: 'bash', reason: 'fake escalation' }])
+    const responses = await vi.waitFor(async () =>
+      (await readFile(recordFile, 'utf8')).trim().split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>))
+    expect(responses).toEqual([{ jsonrpc: '2.0', id: 'fake-approval-1', result: { outcome: 'allowed-once' } }])
+  })
+
+  it('answers an unhandled approval question with an error response the runtime fails closed on', async () => {
+    const dir = await tempDir('sdk-client-approval-unhandled-')
+    const recordFile = join(dir, 'approval-responses.jsonl')
+    const harness = harnessWith({ FAKE_APPROVAL_ASK: '1', FAKE_RECORD_APPROVAL_RESPONSE: recordFile })
+    await harness.run('needs approval')
+    // The response frame crosses processes; poll for the fake's record.
+    const responses = await vi.waitFor(async () =>
+      (await readFile(recordFile, 'utf8')).trim().split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>))
+    const response = responses[0] as { id?: unknown; error?: { code?: unknown; message?: unknown } }
+    expect(response.id).toBe('fake-approval-1')
+    expect(response.error?.code).toBe(-32603)
+    expect(String(response.error?.message)).toContain('no handler')
+  })
+})
+
+describe('HarnessClient interrupt', () => {
+  it('sends keepInbox on the wire only when given, and an idle session accepts the interrupt', async () => {
+    const dir = await tempDir('sdk-client-interrupt-')
+    const recordFile = join(dir, 'interrupts.jsonl')
+    const harness = harnessWith({ FAKE_RECORD_INTERRUPT: recordFile })
+    const session = harness.session('recorded')
+    await session.run('seed the session')
+    // Both interrupts land on an idle session: accepted as no-ops.
+    await session.interrupt()
+    await session.interrupt({ keepInbox: true })
+    await harness.close()
+
+    const records = (await readFile(recordFile, 'utf8')).trim().split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(records).toEqual([{ sessionId: 'recorded' }, { sessionId: 'recorded', keepInbox: true }])
+  })
+
+  it('rejects interrupting a session the runtime does not know', async () => {
+    const harness = harnessWith()
+    const failure = await harness.session('missing').interrupt().then(
+      () => { throw new Error('interrupt unexpectedly succeeded') },
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(JsonRpcResponseError)
+    expect((failure as JsonRpcResponseError).message).toContain('missing')
+    await harness.close()
+  })
+
+  it('rejects a non-object interrupt result as a protocol error', async () => {
+    const harness = harnessWith({ FAKE_MALFORMED_INTERRUPT: '1' })
+    const session = harness.session('malformed-interrupt')
+    await session.run('seed the session')
+    await expect(session.interrupt()).rejects.toThrow(SdkProtocolError)
+    await harness.close()
   })
 })
 

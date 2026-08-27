@@ -20,6 +20,13 @@ import { createLaunchEnvironmentSnapshot, type LaunchEnvironmentSnapshot } from 
 import type {} from '@deepseek-ai/cordis-plugin-hmr'
 // Side-effect type import: resolves `ctx.get('systemPrompt')` to the service.
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import { StartupRefusalError } from './errors.ts'
+
+export {
+  classifyStartupFailure,
+  StartupRefusalError,
+  type StartupFailure,
+} from './errors.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -281,7 +288,7 @@ export function loadOptionalPatches(binName: string, file: string): PatchOptions
     content = readFileSync(file, 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return undefined
-    throw new Error(`${binName}: failed to read patches ${file}: ${String(error)}`)
+    throw new StartupRefusalError(`${binName}: failed to read patches ${file}: ${String(error)}`, { cause: error })
   }
   return parsePatchList(binName, file, content, 'patches')
 }
@@ -300,7 +307,7 @@ export function loadOverlayPatches(binName: string, file: string): PatchOptions[
   try {
     content = readFileSync(file, 'utf8')
   } catch (error) {
-    throw new Error(`${binName}: failed to read overlay ${file}: ${String(error)}`)
+    throw new StartupRefusalError(`${binName}: failed to read overlay ${file}: ${String(error)}`, { cause: error })
   }
   return parsePatchList(binName, file, content, 'overlay')
 }
@@ -324,14 +331,14 @@ function parsePatchList(
   try {
     parsed = yaml.load(content, { schema: userPatchesSchema })
   } catch (error) {
-    throw new Error(`${binName}: failed to parse ${label} ${file}: ${String(error)}`)
+    throw new StartupRefusalError(`${binName}: failed to parse ${label} ${file}: ${String(error)}`, { cause: error })
   }
   if (!Array.isArray(parsed)) {
-    throw new Error(`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries`)
+    throw new StartupRefusalError(`${binName}: ${label} ${file} must be a top-level YAML array of loader patch entries`)
   }
   parsed.forEach((entry, index) => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      throw new Error(`${binName}: ${label} entry ${index + 1} in ${file} must be a mapping (a loader patch entry)`)
+      throw new StartupRefusalError(`${binName}: ${label} entry ${index + 1} in ${file} must be a mapping (a loader patch entry)`)
     }
   })
   return parsed as PatchOptions[]

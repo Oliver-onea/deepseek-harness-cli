@@ -33,6 +33,19 @@
  *   arrives, then poll for the GO file before answering (deterministic
  *   cancel-during-handshake window).
  * - `FAKE_HANG_PROMPT`: never answer `session/prompt` (for timeout/dispose tests).
+ * - `FAKE_HANG_TURN`: answer `session/prompt` normally, stream one partial chunk,
+ *   then hold the turn open until `session/interrupt` aborts it (mid-turn
+ *   interrupt probe); the interrupt emits the aborted turn/end and idle status.
+ * - `FAKE_RECORD_INTERRUPT`: append each `session/interrupt` params JSON to this
+ *   file (interrupt wire probe).
+ * - `FAKE_RECORD_STEER`: append each `session/steer` params JSON to this file
+ *   (steer wire probe); the steer itself splices a `next-step` receipt.
+ * - `FAKE_MALFORMED_INTERRUPT`: `session/interrupt` answers a non-object result
+ *   (wire-validation probe).
+ * - `FAKE_APPROVAL_ASK`: each accepted prompt also sends one server→client
+ *   `approval/request` mid-turn (approval handler probe).
+ * - `FAKE_RECORD_APPROVAL_RESPONSE`: append each client response frame to the
+ *   fake's own server→client requests to this file (approval probe).
  * - `FAKE_STREAM_THEN_MALFORMED`: stream a text chunk for the prompt, then
  *   answer `{}` (no accepted) — same-pipe ordering makes the chunk arrive
  *   before the protocol failure (partial-output retention probe).
@@ -153,11 +166,23 @@ function sessionIdOf(params: Record<string, unknown> | undefined): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** Sessions the fake runtime has accepted a prompt for. */
+const knownSessions = new Set<string>()
+/** Sessions whose accepted turn hangs until `session/interrupt` arrives. */
+const hungSessions = new Set<string>()
+
 const reader = createInterface({ input: process.stdin })
 reader.on('line', (line) => {
   if (line.trim().length === 0) return
   const frame = JSON.parse(line) as { id?: string | number; method?: string; params?: Record<string, unknown> }
-  if (frame.method === undefined || frame.id === undefined) return
+  // A response to a server→client request this fake sent (approval probe).
+  if (frame.method === undefined) {
+    if (frame.id !== undefined && env.FAKE_RECORD_APPROVAL_RESPONSE !== undefined) {
+      appendFileSync(env.FAKE_RECORD_APPROVAL_RESPONSE, `${JSON.stringify(frame)}\n`)
+    }
+    return
+  }
+  if (frame.id === undefined) return
   const respond = (result: object): void => { write({ jsonrpc: '2.0', id: frame.id, result }) }
   switch (frame.method) {
     case 'initialize':
@@ -195,6 +220,7 @@ reader.on('line', (line) => {
       return
     case 'session/prompt': {
       const sessionId = sessionIdOf(frame.params)
+      knownSessions.add(sessionId)
       const messageId = `fake-user-${seq}`
       event(sessionId, 'agent/inbox/spliced', {
         target: 'next-turn',
@@ -207,6 +233,16 @@ reader.on('line', (line) => {
         }],
       })
       notify('session.status', { sessionId, status: 'running' })
+      // Ask the wire client to decide one approval mid-turn (approval probe);
+      // the recorded response frame observes whether a handler answered.
+      if (env.FAKE_APPROVAL_ASK !== undefined) {
+        write({
+          jsonrpc: '2.0',
+          id: `fake-approval-${seq}`,
+          method: 'approval/request',
+          params: { sessionId, toolName: 'bash', reason: 'fake escalation' },
+        })
+      }
       if (env.FAKE_STREAM_THEN_MALFORMED !== undefined) {
         event(sessionId, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'streamed then cut short' } })
         respond({})
@@ -217,9 +253,54 @@ reader.on('line', (line) => {
         respond({})
         return
       }
+      if (env.FAKE_HANG_TURN !== undefined) {
+        event(sessionId, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text: 'partial' } })
+        hungSessions.add(sessionId)
+        respond({ messageId })
+        return
+      }
       runTurn(sessionId)
       notify('session.status', { sessionId, status: 'idle' })
       respond({ messageId })
+      return
+    }
+    case 'session/steer': {
+      const sessionId = sessionIdOf(frame.params)
+      if (env.FAKE_RECORD_STEER !== undefined) appendFileSync(env.FAKE_RECORD_STEER, `${JSON.stringify(frame.params)}\n`)
+      if (!knownSessions.has(sessionId)) {
+        write({ jsonrpc: '2.0', id: frame.id, error: { code: -32603, message: `unknown SDK session for session/steer: ${sessionId}` } })
+        return
+      }
+      const messageId = `fake-steer-${seq}`
+      event(sessionId, 'agent/inbox/spliced', {
+        target: 'next-step',
+        start: 0,
+        inserted: [{
+          id: messageId,
+          role: 'user',
+          content: [],
+          source: { kind: 'user' },
+        }],
+      })
+      respond({ messageId })
+      return
+    }
+    case 'session/interrupt': {
+      const sessionId = sessionIdOf(frame.params)
+      if (env.FAKE_RECORD_INTERRUPT !== undefined) appendFileSync(env.FAKE_RECORD_INTERRUPT, `${JSON.stringify(frame.params)}\n`)
+      if (env.FAKE_MALFORMED_INTERRUPT !== undefined) {
+        write({ jsonrpc: '2.0', id: frame.id, result: 'not-an-object' })
+        return
+      }
+      if (!knownSessions.has(sessionId)) {
+        write({ jsonrpc: '2.0', id: frame.id, error: { code: -32603, message: `unknown SDK session for session/interrupt: ${sessionId}` } })
+        return
+      }
+      if (hungSessions.delete(sessionId)) {
+        event(sessionId, 'turn/end', { turn: 0, reason: { kind: 'aborted', reason: { kind: 'user' } } })
+        notify('session.status', { sessionId, status: 'idle' })
+      }
+      respond({})
       return
     }
     case 'shutdown':

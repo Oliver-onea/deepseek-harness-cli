@@ -80,10 +80,17 @@
 
     # Credential sources: inherited environment over the managed
     # `$DSH_HOME/.credentials.yaml`, with project and user `.env` fallbacks.
-    # Adapters resolve references per request; the Models page writes only the
-    # managed document, which is never materialized into the process environment.
+    # Adapters resolve references per request; the Models page and the
+    # `/credential` command write only the managed document, which is never
+    # materialized into the process environment.
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
+
+    # The terminal's write path into the credentials seam: `/credential`
+    # stores or describes one reference through the service above, so a
+    # terminal-only deployment can set a key without the web Models page.
+    - id: command-credential
+      name: '@deepseek-ai/dsh-command-credential'
 
     # The pi-ai multi-provider twin, mounted dormant: zero routes (and no extra
     # models in the picker) until a `llm-pi-ai:` settings section supplies provider

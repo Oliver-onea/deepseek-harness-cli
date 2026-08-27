@@ -565,7 +565,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/credentials/credentials-local/src/index.ts:55`](../packages/credentials/credentials-local/src/index.ts)
+Source: [`packages/credentials/credentials-local/src/index.ts:56`](../packages/credentials/credentials-local/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 
@@ -2796,6 +2796,45 @@ export type ToolPresentationMode = 'native' | 'code' | 'both'
 
 Source: [`packages/core/tools/src/index.ts:654`](../packages/core/tools/src/index.ts)
 
+<a id="deepseek-aidsh-tui"></a>
+
+## `@deepseek-ai/dsh-tui`
+
+Requires: `agents` · `timer` · `tools`
+
+```ts config-catalog
+/** Plugin config. */
+export interface Config {
+  /** The exact session id of the agent this terminal drives, as created by the host. */
+  session: string
+  /** Whether to style output; `false` renders the same layout without SGR sequences. */
+  color?: boolean
+  /**
+   * The color depth to draw at. `auto` reads the terminal's advertised
+   * capability; the other values pin one rung of the degradation ladder.
+   * Ignored when `color` is `false`.
+   */
+  colorDepth?: 'auto' | ColorDepth | 'none'
+  /** Lines kept at the head of a folded tool-card body. */
+  headLines?: number
+  /** Lines kept at the tail of a folded tool-card body. */
+  tailLines?: number
+  /** Whether reasoning starts visible; a terminal control toggles it either way. */
+  showReasoning?: boolean
+  /** A first prompt to submit once the screen is up, for `dsh "<task>"`. */
+  task?: string
+  /** Maximum time to wait for the configured agent before refusing startup. */
+  agentWaitTimeoutMs?: number
+  /** Candidate rows the `/` and `@` menus show before scrolling. */
+  maxSuggestions?: number
+}
+
+/** The color depths the palette draws at, deepest first. */
+export type ColorDepth = 'truecolor' | '256' | '16'
+```
+
+Source: [`packages/ui/tui/src/index.ts:79`](../packages/ui/tui/src/index.ts)
+
 <a id="deepseek-aidsh-typert-loader"></a>
 
 ## `@deepseek-ai/dsh-typert-loader`
@@ -3061,6 +3100,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
+- `@deepseek-ai/dsh-command-credential` — requires `commands` ([`packages/credentials/command-credential/src/index.ts`](../packages/credentials/command-credential/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
 - `@deepseek-ai/dsh-commands` ([`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts))
@@ -3146,6 +3186,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-session-title-llm` ([`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts))
 - `@deepseek-ai/dsh-subagent-in-process-driver` ([`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts))
 - `@deepseek-ai/dsh-timeout` ([`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts))
+- `@deepseek-ai/dsh-tui-app` ([`packages/bundle/tui-app/src/index.ts`](../packages/bundle/tui-app/src/index.ts))
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))
 - `@deepseek-ai/dsh-typert-registry` ([`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts))

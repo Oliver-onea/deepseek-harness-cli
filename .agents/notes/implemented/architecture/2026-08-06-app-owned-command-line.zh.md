@@ -10,7 +10,7 @@ profile 落地之后，组合可以安装，命令行却不能。`apps/cli` 仍�
 
 ## 决策
 
-启动器只解析属于自己的部分（`--profile`、`--patch`、配置 dump），并把**自己 flag 之后的一切**原样交给引导起来的配置树。切分按位置进行：启动器不认识的第一个 token 就是应用参数的起点（依靠 commander 的 `passThroughOptions` + `allowUnknownOption` + `helpOption(false)`）。裸的 `dsh -h` 没有可交付的应用，仍然打印启动器自己的 help。
+启动器只解析属于自己的部分（`--profile`、`--patch`、配置 dump），并把**自己 flag 之后的一切**原样交给引导起来的配置树。切分按位置进行：启动器不认识的第一个 token 就是应用参数的起点（依靠 commander 的 `passThroughOptions` + `allowUnknownOption` + `helpOption(false)`）。启动器边界处的 `--` 会恢复为第一个应用参数，而边界后的 `--` 已经位于原样后缀中；两种位置下都由应用解析器持有并消费该终止符。裸的 `dsh -h` 没有可交付的应用，仍然打印启动器自己的 help。
 
 新包 `@deepseek-ai/dsh-cmdline` 持有这次交接。启动器在任何条目挂载之前调用 `provideCmdline(ctx, host)`，提供 `ctx.cmdlineArgs`（其全部接口就是 `get(): readonly string[]`）与 `ctx.appExit`。任何普通应用插件都可以注入 `cmdlineArgs`，用自己的 commander program 调用 `parseCmdline(ctx, program)`，再在 program 自己的 action 中把解析出的取值作为应用自有服务提供出去。它的 Loader 行不携带启动器标记或特殊类型，启动器也不会检查组合中的所有者。多个插件可以读取同一份不可变快照；没有读取方的 profile 会忽略自己的应用参数。由提供方配置的行注入其服务，并在惰性配置表达式中直接读取它（`port: !!js ctx.webStartup.port ?? 3080`），因此 flag 胜过写在它旁边的值，也没有任何东西被写回任何一行。
 
@@ -46,5 +46,5 @@ boot 只挂载一次整套组合。Cordis 让每一行等待其注入激活；Lo
 - `--help` 会让所有依赖提供方服务的行保持待处理并请求有边界的退出；无关行可能在拆除前并发激活。
 - 应用自有服务没有静态声明的提供方：交付了消费行却缺少对应提供方的组合包会在结算时失败，报出指向该服务的待处理条目，而不是在加载时失败。
 - 用户 patch 若整体替换某行的 `config`，会连同其中的表达式一起丢掉，该行上 flag 的优先级也随之消失。
-- 启动器的 flag 必须写在应用参数之前；如果应用的第一个参数恰好等于 `web` 或 `plugin`，会选择对应的子命令；`-V`／`--version` 在该边界之前仍归启动器持有；而且启动器的解析器会消耗掉一个 `--`，因此要给应用传一个字面量 `--` 需要写成 `-- --`。
+- 启动器的 flag 必须写在应用参数之前；如果应用的第一个参数恰好等于 `web` 或 `plugin`，会选择对应的子命令；`-V`／`--version` 在该边界之前仍归启动器持有。边界两侧的 `--` 都会到达应用解析器；应用解析器消费它，并将后续形似 flag 的 token 当作位置参数。
 - `--dump-config` 从不运行应用命令行提供方，因此它在任何应用参数被解析之前打印组合，并拒绝携带应用参数的调用。
