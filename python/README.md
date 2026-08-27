@@ -15,6 +15,17 @@ Python packages for driving DeepSeek Harness as a subprocess. The client SDK com
 
 The SDK starts the matching bundled runtime unless the caller selects an explicit channel. The client selects the channel and supplies default configuration; the runtime itself always requires an explicit configuration. The [SDK reference](sdk/README.md) and [runtime carrier reference](sdk-runtime/README.md) own the complete runtime-selection and configuration contracts.
 
+## Interactive control
+
+The Python SDK mirrors the TypeScript client's interactive methods:
+
+- `HarnessClient.session_steer(session_id, content_blocks)` — steer a running session.
+- `HarnessClient.session_interrupt(session_id, keep_inbox=False)` — interrupt a session's active turn.
+- `HarnessClient.shutdown()` — send a protocol shutdown request.
+- `HarnessClient.on_approval_request(handler)` — register a handler for server→client approval questions.
+
+The high-level `Session` class exposes `steer()` and `interrupt()` for convenience.
+
 ## Contributor workflows
 
 The [Python contributor workflows](development.md) cover building runtime artifacts, validating the packages, source-mode development, and distribution.

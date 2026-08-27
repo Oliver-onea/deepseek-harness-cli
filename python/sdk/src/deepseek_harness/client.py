@@ -21,6 +21,24 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 NotificationFilter: TypeAlias = Callable[[Notification], bool]
 
 
+class ApprovalRequestParams(BaseModel):
+    """Server→client approval question: decide one pending tool action."""
+
+    sessionId: str
+    toolName: str
+    callId: str | None = None
+    reason: str | None = None
+
+
+class ApprovalRequestResult(BaseModel):
+    """Client decision for one approval question."""
+
+    outcome: str
+
+
+ApprovalRequestHandler: TypeAlias = Callable[[ApprovalRequestParams], ApprovalRequestResult]
+
+
 @dataclass(slots=True)
 class HarnessConfig:
     """Configuration for launching the local DeepSeek Harness SDK runtime."""
@@ -52,6 +70,7 @@ class HarnessClient:
         self._stderr_lines: deque[str] = deque(maxlen=400)
         self._reader_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._approval_handler: ApprovalRequestHandler | None = None
 
     def __enter__(self) -> "HarnessClient":
         self.start()
@@ -84,12 +103,84 @@ class HarnessClient:
         self._start_reader_thread()
         self._start_stderr_thread()
 
+    def on_approval_request(self, handler: ApprovalRequestHandler) -> None:
+        """Install the handler for server→client approval questions.
+
+        Without a handler the runtime's questions get an error response and the
+        tool call fails closed; a handler that raises, and a malformed runtime
+        answer, fail closed the same way.
+
+        Args:
+            handler: decides each question; ``'allowed-once'`` is the only grant.
+        """
+        self._approval_handler = handler
+
+    def _dispatch_server_request(self, request_id: str | int, method: str, params: JsonObject) -> None:
+        """Dispatch one server→client request to its typed handler.
+
+        Sends an error response on unknown methods, malformed params, or a
+        handler that returns no decision.
+        """
+        from .errors import SdkProtocolError
+
+        handler = self._approval_handler
+        if method != "approval/request" or handler is None:
+            self.respond_error(
+                request_id,
+                code=-32601,
+                message=f"no handler for DeepSeek Harness runtime request: {method}",
+            )
+            return
+
+        # Wire boundary: validate params shape
+        if (
+            not isinstance(params.get("sessionId"), str)
+            or not isinstance(params.get("toolName"), str)
+            or (params.get("callId") is not None and not isinstance(params["callId"], str))
+            or (params.get("reason") is not None and not isinstance(params["reason"], str))
+        ):
+            self.respond_error(
+                request_id,
+                code=-32602,
+                message=f"approval/request carried malformed params: {json.dumps(params)}",
+            )
+            return
+
+        try:
+            result = handler(ApprovalRequestParams.model_validate(params))
+        except BaseException as exc:
+            self.respond_error(
+                request_id,
+                code=-32603,
+                message=f"approval handler raised: {exc}",
+            )
+            return
+
+        outcome = getattr(result, "outcome", None)
+        if outcome not in {"allowed-once", "rejected"}:
+            self.respond_error(
+                request_id,
+                code=-32603,
+                message="approval handler returned no decision",
+            )
+            return
+
+        self.respond(request_id, {"outcome": outcome})
+
+    def shutdown(self) -> None:
+        """Send a protocol ``shutdown`` request to the runtime.
+
+        This is a best-effort graceful shutdown signal. The transport close
+        (performed by :meth:`close`) is the authoritative teardown.
+        """
+        self.request("shutdown", None, response_model=_ShutdownResponse, timeout_seconds=self.config.shutdown_timeout_seconds)
+
     def close(self) -> None:
         proc = self._proc
         if proc is None:
             return
         try:
-            self.request("shutdown", None, response_model=_ShutdownResponse, timeout_seconds=self.config.shutdown_timeout_seconds)
+            self.shutdown()
         except Exception as exc:
             self._stderr_lines.append(f"shutdown request failed: {exc}")
         if proc.stdin:
@@ -153,6 +244,58 @@ class HarnessClient:
             notification_subscription=notification_subscription,
         )
         return response.messageId
+
+    def session_steer(
+        self,
+        session_id: str,
+        content_blocks: list[JsonObject],
+    ) -> str:
+        """Steer one session: the content joins the running turn at its next step
+        boundary, or opens the next turn when the session is idle.
+
+        Args:
+            session_id: target session; it must already exist server-side.
+            content_blocks: the steering message, sent verbatim.
+
+        Returns:
+            the spliced message id.
+
+        Raises:
+            SdkProtocolError: when the result carries no message id.
+        """
+        from .errors import SdkProtocolError
+        payload: JsonObject = {"sessionId": session_id, "contentBlocks": content_blocks}
+        result = self._request_raw("session/steer", payload)
+        if not isinstance(result, dict) or not isinstance(result.get("messageId"), str):
+            raise SdkProtocolError(f"session/steer returned no message id: {json.dumps(result)}")
+        return result["messageId"]
+
+    def session_interrupt(
+        self,
+        session_id: str,
+        *,
+        keep_inbox: bool = False,
+    ) -> None:
+        """Interrupt one session's active turn.
+
+        Queued and steering work is cleared unless ``keep_inbox`` preserves it
+        (preserved work stays parked until a later waking prompt claims it).
+        An idle session accepts the interrupt as a no-op; an unknown session id
+        rejects with the wire error naming it. The abort itself is observed
+        through notifications.
+
+        Args:
+            session_id: target session; it must already exist server-side.
+            keep_inbox: preserve queued and steering inbox items while the active
+                turn aborts. Defaults to ``False`` (the ``Agent.cancel`` default).
+        """
+        params: JsonObject = {"sessionId": session_id}
+        if keep_inbox:
+            params["keepInbox"] = True
+        result = self._request_raw("session/interrupt", params)
+        if not isinstance(result, dict):
+            from .errors import SdkProtocolError
+            raise SdkProtocolError(f"session/interrupt returned a non-object result: {json.dumps(result)}")
 
     def request(
         self,
@@ -347,6 +490,11 @@ class HarnessClient:
         method = message.get("method")
         if isinstance(msg_id, (str, int)) and isinstance(method, str):
             params = message.get("params")
+            # approval/request is dispatched to the registered handler automatically.
+            # All other server→client requests are queued for next_request().
+            if method == "approval/request":
+                self._dispatch_server_request(msg_id, method, params if isinstance(params, dict) else {})
+                return
             self._requests.put(IncomingRequest(id=msg_id, method=method, payload=params if isinstance(params, dict) else {}))
             return
         if isinstance(msg_id, (str, int)):
@@ -547,6 +695,14 @@ class NotificationSubscription:
 
 class _SessionPromptResponse(BaseModel):
     messageId: str
+
+
+class _SessionSteerResponse(BaseModel):
+    messageId: str
+
+
+class _SessionInterruptResponse(BaseModel):
+    pass
 
 
 class _ShutdownResponse(BaseModel):
