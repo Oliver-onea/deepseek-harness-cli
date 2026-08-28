@@ -18,9 +18,18 @@ import { HarnessSdkJsonRpcServer } from '../src/index.ts'
 
 class FakeTransport implements JsonRpcTransportPeer {
   notifications: { method: string; params?: Record<string, unknown> }[] = []
+  /** Server→client requests the transport carried, in order. */
+  serverRequests: { method: string; params: Record<string, unknown>; signal: AbortSignal | undefined }[] = []
+  /** Scripted answers, one per expected server→client request, in order. */
+  serverAnswers: unknown[] = []
 
-  async request(method: string, params: object): Promise<unknown> {
-    throw new Error(`the SDK server should not call host JSON-RPC method ${method} with ${JSON.stringify(params)}`)
+  async request(method: string, params: object, signal?: AbortSignal): Promise<unknown> {
+    this.serverRequests.push({ method, params: params as Record<string, unknown>, signal })
+    if (signal?.aborted) throw new Error('aborted')
+    const answer = this.serverAnswers.shift()
+    if (answer === undefined) throw new Error(`the SDK server sent an unscripted client request: ${method}`)
+    if (answer instanceof Error) throw answer
+    return answer
   }
 
   notify(method: string, params?: object): void {
@@ -585,6 +594,58 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(typeof (result as { messageId: unknown }).messageId).toBe('string')
     expect(steer).toHaveBeenCalledTimes(1)
     expect(steer.mock.calls[0]?.[0].content).toEqual([{ type: 'text', text: 'course' }])
+    await server.shutdown()
+  })
+
+  it('routes approval questions for its own agents to the client and maps the answer', async () => {
+    const steer = vi.fn<Agent['steer']>()
+    const followup = vi.fn<Agent['followup']>()
+    const agent = {
+      id: SessionId('main'),
+      session: { id: SessionId('main') },
+      followup,
+      steer,
+    } as unknown as Agent
+    const handle = { agent, dispose: vi.fn(() => Promise.resolve()) }
+    const on = vi.fn((_event: string, _listener: unknown) => () => undefined)
+    const ctx = {
+      on,
+      agents: { create: vi.fn(async () => handle), get: () => handle.agent },
+      get: () => undefined,
+    } as unknown as Context
+    const transport = new FakeTransport()
+    const server = new HarnessSdkJsonRpcServer(ctx, transport)
+    await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'seed' }] })
+    const registration = (on.mock.calls as unknown as [string, unknown][]).find(([event]) => event === 'approval/request')
+    if (registration === undefined) throw new Error('the server registered no approval answerer')
+    const answerer = registration[1] as (req: { agent: Agent; toolName: string; callId?: string; reason?: string }, next: () => Promise<'unavailable'>) => Promise<'allowed-once' | 'rejected' | 'unavailable'>
+
+    // An owned agent's question reaches the client with the audit facts.
+    transport.serverAnswers.push(Promise.resolve({ outcome: 'allowed-once' }))
+    await expect(answerer(
+      { agent, toolName: 'bash', callId: 'call_1', reason: 'escalation requested' },
+      () => Promise.resolve('unavailable'),
+    )).resolves.toBe('allowed-once')
+    expect(transport.serverRequests).toEqual([{
+      method: 'approval/request',
+      params: { sessionId: 'main', toolName: 'bash', callId: 'call_1', reason: 'escalation requested' },
+      signal: undefined,
+    }])
+
+    // Any other answer fails closed; a client error rejects to the approval
+    // service's containment.
+    transport.serverAnswers.push(Promise.resolve({ outcome: 'rejected' }))
+    await expect(answerer({ agent, toolName: 'bash' }, () => Promise.resolve('unavailable'))).resolves.toBe('rejected')
+    transport.serverAnswers.push(Promise.resolve({}))
+    await expect(answerer({ agent, toolName: 'bash' }, () => Promise.resolve('unavailable'))).resolves.toBe('rejected')
+    transport.serverAnswers.push(new Error('client answered nothing'))
+    await expect(answerer({ agent, toolName: 'bash' }, () => Promise.resolve('unavailable'))).rejects.toThrow('client answered nothing')
+
+    // A question for an agent this server does not own delegates down the chain.
+    const other = { id: SessionId('other'), session: { id: SessionId('other') } } as unknown as Agent
+    await expect(answerer({ agent: other, toolName: 'bash' }, () => Promise.resolve('unavailable')))
+      .resolves.toBe('unavailable')
+    expect(transport.serverRequests).toHaveLength(4)
     await server.shutdown()
   })
 
@@ -1309,6 +1370,6 @@ describe('HarnessSdkJsonRpcServer', () => {
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
 
     await expect(server.shutdown()).rejects.toBe(listenerFailure)
-    expect(on).toHaveBeenCalledTimes(4)
+    expect(on).toHaveBeenCalledTimes(5)
   })
 })

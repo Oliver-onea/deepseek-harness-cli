@@ -16,6 +16,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import {
   JsonRpcLineTransport,
   JsonRpcResponseError,
+  type ApprovalRequestParams,
+  type ApprovalRequestResult,
   type InitializeParams,
   type InitializeResult,
   type SessionInterruptParams,
@@ -24,7 +26,7 @@ import {
 } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { disposeRuntimeProcess } from './dispose.ts'
-import type { HarnessClientOptions, HarnessNotification, NotificationFilter, SessionInterruptOptions } from './types.ts'
+import type { ApprovalRequestHandler, HarnessClientOptions, HarnessNotification, NotificationFilter, SessionInterruptOptions } from './types.ts'
 
 /** Retained stderr lines used to diagnose an unexpected runtime death. */
 const STDERR_TAIL_LIMIT = 400
@@ -194,6 +196,7 @@ export class HarnessClient {
   private spawnError: Error | undefined
   private streamsSettled: Promise<void> = Promise.resolve()
   private closeTask: Promise<void> | undefined
+  private approvalHandler: ApprovalRequestHandler | undefined
 
   /** @param options - launch spec, complete child environment, and timeouts. */
   constructor(readonly options: HarnessClientOptions) {}
@@ -258,8 +261,49 @@ export class HarnessClient {
     })
     const transport = new JsonRpcLineTransport(child.stdout, child.stdin)
     transport.onNotification((method, params) => { this.dispatchNotification({ method, params }) })
+    transport.onRequest((method, params) => this.dispatchServerRequest(method, params))
     transport.start()
     this.transport = transport
+  }
+
+  /**
+   * Install the handler for server→client approval questions
+   * (`approval/request`). Without a handler the runtime's questions get an
+   * error response and the tool call fails closed; a handler that throws, and a
+   * malformed runtime answer, fail closed the same way.
+   * @param handler - decides each question; `'allowed-once'` is the only grant.
+   */
+  onApprovalRequest(handler: ApprovalRequestHandler): void {
+    this.approvalHandler = handler
+  }
+
+  /**
+   * Dispatch one server→client request to its typed handler. Throws (→ an
+   * error response the server fails closed on) on an unknown method.
+   * @param method - the JSON-RPC method name.
+   * @param params - the raw params object from the wire.
+   * @returns the handler's result, to be serialized as the response.
+   */
+  private async dispatchServerRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const handler = this.approvalHandler
+    if (method !== 'approval/request' || handler === undefined) {
+      throw new Error(`no handler for DeepSeek Harness runtime request: ${method}`)
+    }
+    // Wire boundary: the question feeds a typed handler, so a malformed
+    // runtime surfaces as an error response, not type-invalid data.
+    if (typeof params.sessionId !== 'string' || typeof params.toolName !== 'string'
+      || (params.callId !== undefined && typeof params.callId !== 'string')
+      || (params.reason !== undefined && typeof params.reason !== 'string')) {
+      throw new SdkProtocolError(`approval/request carried malformed params: ${JSON.stringify(params)}`)
+    }
+    const result = await handler(params as unknown as ApprovalRequestParams)
+    // Wire boundary: a handler answer outside the decision vocabulary fails
+    // the question closed as an error response.
+    const outcome: unknown = (result as { outcome?: unknown } | null | undefined)?.outcome
+    if (typeof outcome !== 'string' || (outcome !== 'allowed-once' && outcome !== 'rejected')) {
+      throw new SdkProtocolError(`approval handler returned no decision: ${JSON.stringify(result)}`)
+    }
+    return { outcome } satisfies ApprovalRequestResult
   }
 
   /**

@@ -42,4 +42,4 @@ The TypeScript client carries `HarnessClient.interrupt(sessionId, options?)` at 
 
 - The parked-queue semantics (preserved work waits for a waking prompt rather than resuming on its own) can surprise a client expecting web-style immediate continuation; the wire documentation and both snapshots state it explicitly, and changing it would be an agent-loop decision, not an SDK one.
 - Until the Python SDK gains its own interrupt, the two SDKs diverge on a protocol method; the gap is recorded in the READMEs so Python users are not surprised by a missing method.
-- Approval requests and `turn/steer` remain the other two interactive gaps; this design neither solves nor obstructs them — a future steer request would route through the same per-session record and the same acceptance-receipt shape.
+- Approval requests and `turn/steer` were the other two interactive gaps when this shipped; [`session/steer`](2026-08-19-sdk-session-steer.md) and [`approval/request`](2026-08-19-sdk-approval-request.md) later closed both through the same per-session record.

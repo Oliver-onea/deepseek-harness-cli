@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { HarnessClient, isRecord, SdkProtocolError } from './client.ts'
-import type { ContentBlock, DeepSeekHarnessOptions, HarnessClientOptions, HarnessNotification, RunResult, SessionInterruptOptions } from './types.ts'
+import type { ContentBlock, ApprovalRequestHandler, DeepSeekHarnessOptions, HarnessClientOptions, HarnessNotification, RunResult, SessionInterruptOptions } from './types.ts'
 
 /**
  * Reusable SDK for running DeepSeek Harness agent turns in a runtime
@@ -22,6 +22,7 @@ import type { ContentBlock, DeepSeekHarnessOptions, HarnessClientOptions, Harnes
 export class DeepSeekHarness implements AsyncDisposable {
   private clientInstance: HarnessClient
   private readonly launch: HarnessClientOptions
+  private readonly onApproval: ApprovalRequestHandler | undefined
   private readonly cwd: string
   private readonly provider: string
   private readonly model: string
@@ -32,7 +33,8 @@ export class DeepSeekHarness implements AsyncDisposable {
   /** @param options - runtime launch spec plus the session route (cwd/provider/model). */
   constructor(options: DeepSeekHarnessOptions) {
     this.launch = options.launch
-    this.clientInstance = new HarnessClient(options.launch)
+    this.onApproval = options.onApproval
+    this.clientInstance = this.freshClient()
     // Absolute before the handshake: the child spawns relative to THIS
     // process's cwd, but the wire cwd is resolved again inside the child — a
     // relative value would double-resolve (e.g. `worker` → `worker/worker`).
@@ -40,6 +42,13 @@ export class DeepSeekHarness implements AsyncDisposable {
     this.provider = options.provider ?? 'deepseek-official'
     this.model = options.model ?? 'deepseek-v4-flash'
     this.maxTokens = options.maxTokens
+  }
+
+  /** One client with this harness's approval handler installed (a failed-handshake retry keeps it). */
+  private freshClient(): HarnessClient {
+    const client = new HarnessClient(this.launch)
+    if (this.onApproval !== undefined) client.onApprovalRequest(this.onApproval)
+    return client
   }
 
   /**
@@ -72,7 +81,7 @@ export class DeepSeekHarness implements AsyncDisposable {
       } catch (error) {
         this.initialized = undefined
         await this.clientInstance.close()
-        if (!this.closed) this.clientInstance = new HarnessClient(this.launch)
+        if (!this.closed) this.clientInstance = this.freshClient()
         throw error
       }
     })()

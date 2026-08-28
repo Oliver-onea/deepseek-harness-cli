@@ -34,4 +34,4 @@ Status: implemented
 
 - next-step 的消费顺序遵循 agent 循环的 step 边界，而非相对工具执行的到达顺序；需要在单个 step 内严格排序的客户端应通过自己的协议自行负责。
 - 在 Python SDK 获得自己的 steer 之前，两个 SDK 在该协议方法上存在分歧；差距已记录在 README 中，Python 用户不会感到意外。
-- 审批请求仍是该协议上最后一个交互缺口；为它预留的 server→client 请求能力不受此变更影响。
+- 本决定落地时审批请求仍是剩余的交互缺口；[`approval/request`](2026-08-19-sdk-approval-request.md) 随后按同样的逐会话所有权规则闭合了它。

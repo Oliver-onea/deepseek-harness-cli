@@ -1,0 +1,27 @@
+# Keyless replay for the approval scenario: the base jsonrpc deployment with
+# the approval + hook insertions and the replay swap in one patch set (patch
+# ids resolve against the directly included tree, so this does not nest behind
+# approval.cordis.yml).
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: approval
+            name: '@deepseek-ai/dsh-user-approval'
+          - id: hooks-cc
+            name: '@deepseek-ai/dsh-hooks-claude-code'
+            config:
+              configPath: !!js "process.env.DSH_CWD + '/hooks.json'"
+          - id: llm-replay
+            name: '@deepseek-ai/dsh-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek
+                  models:
+                    - id: deepseek-v4-flash

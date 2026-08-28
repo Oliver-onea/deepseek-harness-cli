@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_00_sdkapprovalprobe00", "name": "bash", "argumentsDelta": "{\"command\":\"echo approval-proof-1357\",\"description\":\"Echo the approval proof\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_00_sdkapprovalprobe00", "name": "bash", "arguments": "{\"command\":\"echo approval-proof-1357\",\"description\":\"Echo the approval proof\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "text" },
+      { "type": "text-delta", "index": 0, "text": "Approved and done." },
+      { "type": "block-end", "index": 0, "block": { "type": "text", "text": "Approved and done." } },
+      { "type": "usage", "usage": { "inputTokens": 20, "outputTokens": 5 } },
+      { "type": "finish", "reason": { "kind": "stop" } }
+    ]
+  }
+]

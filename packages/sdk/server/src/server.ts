@@ -13,8 +13,10 @@ import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-user-approval'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
+  ApprovalRequestParams,
   InitializeParams,
   InitializeResult,
   JsonRpcTransportPeer,
@@ -42,6 +44,11 @@ function subagentParentOf(carrier: Scoped<SubagentRuntime>): Agent {
 export interface HarnessSdkJsonRpcServerOptions {
   /** Report max-token termination as an accepted result instead of an infrastructure error. */
   maxTokensAsSuccess?: boolean
+}
+
+/** Whether `value` is a plain JSON object (the wire-boundary shape probe). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function successStatus(reason: string, options: HarnessSdkJsonRpcServerOptions): 'ok' | 'error' {
@@ -104,6 +111,24 @@ export class HarnessSdkJsonRpcServer {
         ...(info.lastAssistantMessage === undefined ? {} : { lastAssistantMessage: info.lastAssistantMessage }),
       }
       transport.notify('subagent.finished', payload)
+    }))
+    // Approval answerer: forward questions for THIS server's agents to the SDK
+    // client as a server→client request; every other agent delegates. A client
+    // that answers nothing (no handler, error response, transport loss) rejects
+    // this listener, which the approval service's fail-closed containment
+    // settles as 'unavailable'.
+    this.disposers.push(ctx.on('approval/request', async (req, next) => {
+      const rec = [...this.sessions.values()].find(candidate => candidate.handle.agent === req.agent)
+      if (rec === undefined) return next()
+      const params: ApprovalRequestParams = {
+        sessionId: String(req.agent.session.id),
+        toolName: req.toolName,
+        ...req.callId !== undefined ? { callId: String(req.callId) } : {},
+        ...req.reason !== undefined ? { reason: req.reason } : {},
+      }
+      const result = await transport.request('approval/request', params, req.signal)
+      // Wire boundary: any answer other than the one grant fails closed.
+      return isRecord(result) && result.outcome === 'allowed-once' ? 'allowed-once' : 'rejected'
     }))
   }
 

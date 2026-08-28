@@ -34,4 +34,4 @@ Unlike `session/prompt` and like `session/interrupt`, an unknown session id fail
 
 - The next-step consumption order follows the agent loop's step boundary, not arrival order relative to tool execution; clients needing strict ordering within a step own that through their own protocol.
 - Until the Python SDK gains its own steer, the two SDKs diverge on a protocol method; the gap is recorded in the READMEs so Python users are not surprised.
-- Approval requests remain the last interactive gap on this protocol; the server→client request capability reserved for them is untouched by this change.
+- Approval requests were the remaining interactive gap when this shipped; [`approval/request`](2026-08-19-sdk-approval-request.md) later closed it through the same per-session ownership rule.

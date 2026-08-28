@@ -1,9 +1,11 @@
 /**
  * Named wire types for the DeepSeek Harness SDK runtime protocol: the five
- * request/result pairs and the four server-to-client notification payloads
- * exchanged over the newline-delimited JSON-RPC stdio transport. The server
- * plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share these shapes;
- * `serverInfo.name` stays the wire-stable `deepseek-harness-sdk-runtime`.
+ * client→server request/result pairs, the one server→client request/result
+ * pair (`approval/request`), and the four server-to-client notification
+ * payloads exchanged over the newline-delimited JSON-RPC stdio transport. The
+ * server plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share
+ * these shapes; `serverInfo.name` stays the wire-stable
+ * `deepseek-harness-sdk-runtime`.
  *
  * @module @deepseek-ai/dsh-sdk-protocol/types
  */
@@ -81,6 +83,27 @@ export interface SessionInterruptParams {
  */
 export type SessionInterruptResult = Record<string, never>
 
+/** Server→client approval question: decide one pending tool action. */
+export interface ApprovalRequestParams {
+  /** The SDK-side session id whose agent awaits the decision. */
+  sessionId: string
+  /** The tool the question is about. */
+  toolName: string
+  /** The exact tool call being decided, when the asker had one. */
+  callId?: string
+  /** The asker's human-readable explanation of why it is asking. */
+  reason?: string
+}
+
+/**
+ * Client decision for one approval question. `'allowed-once'` is the only
+ * grant; every other value the server can observe (including an error
+ * response) fails closed.
+ */
+export interface ApprovalRequestResult {
+  outcome: 'allowed-once' | 'rejected'
+}
+
 /** Deployment-mapped SDK outcome: `ok` for an accepted result, `error` otherwise. */
 export type SdkRunStatus = 'ok' | 'error'
 
@@ -141,4 +164,9 @@ export interface HarnessSdkRequestMap {
   'session/steer': { params: SessionSteerParams; result: SessionSteerResult }
   'session/interrupt': { params: SessionInterruptParams; result: SessionInterruptResult }
   'shutdown': { params: undefined; result: Record<string, never> }
+}
+
+/** Server-to-client request methods with their param and result shapes. */
+export interface HarnessSdkServerRequestMap {
+  'approval/request': { params: ApprovalRequestParams; result: ApprovalRequestResult }
 }
