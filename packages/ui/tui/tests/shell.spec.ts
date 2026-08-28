@@ -452,6 +452,52 @@ describe('TerminalShell', () => {
     expect(drawn).not.toContain('workspace-write')
   })
 
+  it('carries the run state on a colored footer indicator', () => {
+    const tui = fakeTui()
+    const agent = fakeAgent()
+    const palette = createPalette(true, 'truecolor')
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette,
+      presenter,
+      commands: undefined,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      defaultRoute: undefined,
+    })
+    shell.start()
+    const idle = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(idle).toContain(`${palette.success('●')} ready`)
+
+    Object.assign(agent, { status: 'running' as const })
+    shell.refreshStatus()
+    const running = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(running).toContain(`${palette.warn('⠋')} working`)
+    shell.stopStatus()
+  })
+
+  it('shows the dim placeholder beside an empty input and the marker once typing starts', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const empty = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(empty).toContain('› / for commands')
+
+    ;(tui.focused as { handleInput(data: string): void }).handleInput('x')
+    const typed = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(typed).toContain('›')
+    expect(typed).not.toContain('/ for commands')
+  })
+
+  it('keeps the editor full-width on a terminal too narrow for the gutter', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const narrow = (tui.layoutRoot as { render(width: number): string[] }).render(9).join('\n')
+    expect(narrow).not.toContain('›')
+  })
+
   it('reflects changing goal state without a new session event', () => {
     let goal: { objective: string; phase: string } | undefined = { objective: 'first', phase: 'active' }
     const { shell, tui } = shellFor({ state: { goal: () => goal } })

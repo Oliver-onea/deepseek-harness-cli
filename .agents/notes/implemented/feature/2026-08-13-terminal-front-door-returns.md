@@ -32,7 +32,7 @@ It requires both stdin and stdout to be TTYs and throws a typed startup refusal 
 
 `displayText()` normalizes every string before it reaches pi-tui or the pane title: carriage returns collapse, tabs expand, and every other C0, DEL, and C1 control becomes a visible `\xNN` escape. Escaping rather than stripping keeps the text honest about what it contained, and is what stops untrusted tool output or model text from repainting the screen or setting the pane title. Only this package and pi-tui create ANSI sequences.
 
-The palette is standard 16-color ANSI foregrounds and SGR attributes with body text and backgrounds left at terminal defaults, so host terminals remap the interface for light and dark themes without a TUI-specific theme setting.
+The palette is role-keyed and draws at the deepest color depth the deployment supports — truecolor, 256-color, the 16-color ANSI set, or no color — with body text and backgrounds left at terminal defaults, so host terminals remap the interface for light and dark themes without a TUI-specific theme setting ([color-depth ladder](../../proposed/architecture/2026-08-26-tui-color-depth-ladder.md)).
 
 ### The rendering dependency
 

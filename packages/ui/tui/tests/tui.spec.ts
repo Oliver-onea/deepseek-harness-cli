@@ -113,6 +113,7 @@ describe('resolveTerminalConfig', () => {
     expect(tui.resolveTerminalConfig({ session: SESSION }))
       .toEqual({
         color: true,
+        colorDepth: 'auto',
         headLines: 8,
         tailLines: 4,
         showReasoning: false,
@@ -123,10 +124,10 @@ describe('resolveTerminalConfig', () => {
 
   it('keeps every stated setting', () => {
     expect(tui.resolveTerminalConfig({
-      session: SESSION, color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+      session: SESSION, color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
       maxSuggestions: 3,
     })).toEqual({
-      color: false, headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
+      color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
       maxSuggestions: 3,
     })
   })
@@ -228,6 +229,13 @@ describe('dsh-tui mounting', () => {
     await ctx.plugin(tui, { session: SESSION, color: false })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(screen(terminal)).toContain('resumed question')
+    // A resumed session keeps its own first entry: no cold-open header.
+    expect(screen(terminal)).not.toContain('DeepSeek Harness')
+  })
+
+  it('seeds the cold-open header over an empty session', async () => {
+    const { terminal } = await mount()
+    expect(screen(terminal)).toContain('DeepSeek Harness')
   })
 
   it('follows live appends onto the screen', async () => {

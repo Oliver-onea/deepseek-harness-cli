@@ -105,9 +105,9 @@ describe('formatPlanMode', () => {
 })
 
 describe('renderStatus', () => {
-  it('reads as ready with the route and the exit hint while idle', () => {
+  it('reads as ready with the route and no pinned hint while idle', () => {
     expect(renderStatus(idle, plain))
-      .toBe('ready · deepseek-official/deepseek-v4-flash · 0 tokens · /help  ctrl+c exit')
+      .toBe('ready · deepseek-official/deepseek-v4-flash · 0 tokens')
   })
 
   it('swaps in elapsed time and the interrupt hint while a turn runs', () => {
@@ -125,8 +125,11 @@ describe('renderStatus', () => {
     expect(status).toContain('2 queued')
   })
 
-  it('styles the same fields when the palette has color', () => {
-    expect(renderStatus(idle, createPalette(true))).toContain('\x1b[32mready\x1b[39m')
+  it('leaves the run-state word to the footer indicator', () => {
+    expect(renderStatus(idle, createPalette(true))).toContain('ready')
+    expect(renderStatus(idle, createPalette(true))).not.toContain('\x1b[32mready\x1b[39m')
+    expect(renderStatus({ ...idle, running: true, elapsedMs: 5000 }, createPalette(true)))
+      .toContain('working 5s')
   })
 
   it('shows goal, plan mode, and permission preset when present', () => {

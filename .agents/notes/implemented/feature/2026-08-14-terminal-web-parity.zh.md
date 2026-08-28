@@ -12,7 +12,7 @@ Status: implemented
 
 输入 `/` 或 `@` 没有任何反应。Web 界面会在光标处识别这两个字符并给出分组候选菜单（[`ui-input-trigger`](../../../../packages/client/ui-input-trigger/README.md)），读者正是借此在不查文档的情况下发现命令、技能和文件引用。终端里，发现这件事根本没有入口。
 
-终端已经依赖一个提供了大部分缺失机制的框架。`dsh-tui` 从 `@earendil-works/pi-tui` 引入了 `Editor`、`ScrollView`、`Text`、`VStack`、`Markdown`、`TuiAltScreen`、`ProcessTerminal`、`matchesKey` 和 `wrapTextWithAnsi`。`Editor` 自带完整的自动补全——由 provider 驱动的建议、带防抖的查询、按键仲裁，以及用 shell 已传入主题绘制的编辑器内候选列表——因此输入触发不需要第二套菜单实现；`SelectList`、`SettingsList`、`Loader` 与 `Image` 仍未引入，它们属于第 C 层的界面。
+终端已经依赖一个提供了大部分缺失机制的框架。`dsh-tui` 从 `@earendil-works/pi-tui` 引入了 `Editor`、`ScrollView`、`Text`、`Loader`、`VStack`、`Markdown`、`TuiAltScreen`、`ProcessTerminal`、`matchesKey` 和 `wrapTextWithAnsi`。`Editor` 自带完整的自动补全——由 provider 驱动的建议、带防抖的查询、按键仲裁，以及用 shell 已传入主题绘制的编辑器内候选列表——因此输入触发不需要第二套菜单实现；`SelectList`、`SettingsList` 与 `Image` 仍未引入，它们属于第 C 层的界面。
 
 ## 决策
 
