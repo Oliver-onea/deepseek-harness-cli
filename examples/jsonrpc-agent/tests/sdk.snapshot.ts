@@ -2,11 +2,12 @@
  * Keyless snapshot coverage for the TypeScript SDK path: each scenario spawns
  * the REAL `dsh-jsonrpc-agent` runtime (per `DSH_EXAMPLE_MODE`) through the
  * REAL `@deepseek-ai/dsh-sdk-client`, drives one turn — or a prompt → queue →
- * interrupt flow — over stdio JSON-RPC, and pins the SDK-visible result, the
- * complete notification stream, and the persisted session logs. Replay serves
- * recorded model responses via `llm-replay` (`cordis.snapshot.yml`);
- * `DSH_SNAPSHOT=record` re-records against the live API; `DSH_SNAPSHOT=refresh`
- * replays committed fixtures and rewrites expected outputs.
+ * interrupt / prompt → steer flow — over stdio JSON-RPC, and pins the
+ * SDK-visible result, the complete notification stream, and the persisted
+ * session logs. Replay serves recorded model responses via `llm-replay`
+ * (`cordis.snapshot.yml`); `DSH_SNAPSHOT=record` re-records against the live
+ * API; `DSH_SNAPSHOT=refresh` replays committed fixtures and rewrites
+ * expected outputs.
  */
 
 import { existsSync } from 'node:fs'
@@ -73,6 +74,13 @@ interface SdkScenario {
    * hang is not recordable.
    */
   interrupt?: { queuedPrompt: string; keepInbox?: boolean; wakePrompt?: string }
+  /**
+   * Authored prompt → steer flow driven over `HarnessClient`: the scripted
+   * first step calls bash `sleep`, and once its `tool/call` lands the client
+   * steers; the steering text must reach the step-2 model request. Replay/refresh
+   * only — the deterministic window depends on the scripted tool call.
+   */
+  steer?: { steerPrompt: string }
   /** Optional scenario-specific live and replay compositions. */
   configs?: { live: string; replay: string }
   /** Environment overrides passed to the runtime subprocess. */
@@ -143,6 +151,16 @@ const SCENARIOS: SdkScenario[] = [
       keepInbox: true,
       wakePrompt: 'Wake the parked queue.',
     },
+  },
+  {
+    // Keyless authored scenario: the scripted step 1 runs bash `sleep 1`, the
+    // client steers while the tool executes, and the steering text joins the
+    // step-2 model request before the turn completes.
+    name: 'steer',
+    prompt: 'Run sleep 1 with your bash tool, then await further instructions.',
+    sessionId: 'sdk-snapshot-steer',
+    children: 0,
+    steer: { steerPrompt: 'Steered course: reply with exactly Steered answer.' },
   },
 ]
 
@@ -408,6 +426,59 @@ async function runInterruptDrive(
   }
 }
 
+/**
+ * Drive the prompt → steer flow over the low-level client: the scripted first
+ * step runs a bash tool call, and once its `tool/call` event lands the client
+ * steers mid-turn. The drive settles on the trailing idle status so the pinned
+ * stream covers the steering receipt, the step-2 model request, and the turn
+ * completion.
+ */
+async function runSteerDrive(
+  harness: DeepSeekHarness,
+  scenario: SdkScenario,
+  steer: NonNullable<SdkScenario['steer']>,
+): Promise<{ result: RunResult; notifications: HarnessNotification[] }> {
+  await harness.start()
+  const client = harness.client
+  const notifications: HarnessNotification[] = []
+  const events: RunResult['events'] = []
+  const subscription = client.subscribeSessionTree(scenario.sessionId)
+  const collect = (notification: HarnessNotification): void => {
+    notifications.push(notification)
+    if (notification.method === 'session.event') {
+      events.push(notification.params.event as RunResult['events'][number])
+    }
+  }
+  const isSessionEvent = (notification: HarnessNotification, type: string): boolean =>
+    notification.method === 'session.event'
+    && notification.params.sessionId === scenario.sessionId
+    && (notification.params.event as { type?: string }).type === type
+  try {
+    await client.prompt(scenario.sessionId, [{ type: 'text', text: scenario.prompt }])
+    // The bash `sleep` in the scripted step 1 holds the tool boundary open, so
+    // the steer lands deterministically mid-turn.
+    while (true) {
+      const notification = await subscription.next()
+      collect(notification)
+      if (isSessionEvent(notification, 'tool/call')) break
+    }
+    await client.steer(scenario.sessionId, [{ type: 'text', text: steer.steerPrompt }])
+    while (true) {
+      const notification = await subscription.next()
+      collect(notification)
+      if (notification.method === 'session.status'
+        && notification.params.sessionId === scenario.sessionId
+        && notification.params.status === 'idle') break
+    }
+  } finally {
+    subscription.close()
+  }
+  return {
+    result: { sessionId: scenario.sessionId, finalResponse: lastAssistantText(events), events, notifications },
+    notifications,
+  }
+}
+
 /** One SDK scenario against a fresh runtime subprocess in an isolated cwd. */
 async function runScenario(scenario: SdkScenario): Promise<{
   result: RunResult
@@ -456,9 +527,11 @@ async function runScenario(scenario: SdkScenario): Promise<{
     model: 'deepseek-v4-flash',
   })
   try {
-    const { result, notifications } = scenario.interrupt === undefined
-      ? await runPromptDrive(harness, scenario, cwd)
-      : await runInterruptDrive(harness, scenario, scenario.interrupt, cwd)
+    const { result, notifications } = scenario.interrupt !== undefined
+      ? await runInterruptDrive(harness, scenario, scenario.interrupt, cwd)
+      : scenario.steer !== undefined
+        ? await runSteerDrive(harness, scenario, scenario.steer)
+        : await runPromptDrive(harness, scenario, cwd)
     await harness.close()
     const logs = await persistedLogs(sessionsRoot)
     const observedFiles = Object.fromEntries(await Promise.all(
@@ -495,8 +568,8 @@ function fixtureFiles(scenario: SdkScenario): string[] {
 describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
   for (const scenario of SCENARIOS) {
     it(`replays ${scenario.name} through the SDK`, async () => {
-      if (recording && scenario.interrupt !== undefined) {
-        throw new Error(`${scenario.name} is authored against the replay hang entry; a live hang is not recordable`)
+      if (recording && (scenario.interrupt !== undefined || scenario.steer !== undefined)) {
+        throw new Error(`${scenario.name} is authored against the replay script; a live hang/tool window is not recordable`)
       }
       const scenarioDir = join(snapshotsDir, scenario.name)
       const notificationsExpectedPath = join(scenarioDir, 'notifications.expected.jsonl')

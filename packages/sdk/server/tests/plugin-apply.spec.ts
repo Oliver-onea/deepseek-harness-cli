@@ -253,6 +253,60 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
     }
   })
 
+  it('answers session/steer over the wire and errors on unknown sessions', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-steer-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const harness = await mountPlugin(storageDir)
+    try {
+      harness.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' } })
+      await harness.waitForFrame(frame => frame.id === 1, 'initialize response')
+      harness.send({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'session/prompt',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'fix it' }] },
+      })
+      await harness.waitForFrame(frame => frame.id === 2, 'prompt response')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status',
+      )
+
+      // An idle steer is Agent.steer's wakeup: it opens the next turn itself.
+      harness.send({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'session/steer',
+        params: { sessionId: 'main', contentBlocks: [{ type: 'text', text: 'steered course' }] },
+      })
+      const steer = await harness.waitForFrame(frame => frame.id === 3, 'steer response')
+      expect(typeof (steer.result as { messageId?: unknown }).messageId).toBe('string')
+      await harness.waitForFrame(
+        frame => frame.method === 'session.status'
+          && (frame.params as { status?: string } | undefined)?.status === 'idle',
+        'idle session status after the steered turn',
+      )
+      expect(llmServer.requests).toHaveLength(2)
+      const second = llmServer.requests[1] as { messages: unknown[] }
+      expect(JSON.stringify(second.messages)).toContain('steered course')
+
+      // An unknown session id fails loud and names the id.
+      harness.send({ jsonrpc: '2.0', id: 4, method: 'session/steer', params: { sessionId: 'ghost', contentBlocks: [] } })
+      const unknown = await harness.waitForFrame(frame => frame.id === 4, 'unknown-session error response')
+      expect(unknown).toEqual({
+        jsonrpc: '2.0',
+        id: 4,
+        error: { code: -32603, message: 'unknown SDK session for session/steer: ghost' },
+      })
+    } finally {
+      await harness.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
   it('answers shutdown before exiting 0 exactly once, even against a racing second shutdown', async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-shutdown-'))
     const harness = await mountPlugin(storageDir, { writeDelayMs: 10 })

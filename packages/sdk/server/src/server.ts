@@ -23,6 +23,8 @@ import type {
   SessionInterruptResult,
   SessionPromptParams,
   SessionPromptResult,
+  SessionSteerParams,
+  SessionSteerResult,
   SubagentFinishedNotification,
   SubagentStartedNotification,
 } from '@deepseek-ai/dsh-sdk-protocol'
@@ -145,6 +147,31 @@ export class HarnessSdkJsonRpcServer {
   }
 
   /**
+   * Splice one steering message into a known SDK session: it joins the running
+   * turn at its next step boundary, or opens the next turn when the session is
+   * idle (`Agent.steer`'s wakeup semantics).
+   * @param params - target session and steering content.
+   * @returns the durable message identity.
+   */
+  steer(params: SessionSteerParams): SessionSteerResult {
+    if (typeof params.sessionId !== 'string') {
+      throw new TypeError('session/steer sessionId must be a string')
+    }
+    // Like interrupt, steer never creates the session: steering targets work
+    // the runtime already owns, and a stale or mistyped id must fail loud.
+    const rec = this.sessions.get(params.sessionId)
+    if (rec === undefined) {
+      throw new Error(`unknown SDK session for session/steer: ${params.sessionId}`)
+    }
+    if (this.ctx.agents.get(rec.handle.agent.id) !== rec.handle.agent) {
+      throw new Error(`session agent was disposed outside the server: ${params.sessionId}`)
+    }
+    const message = createUserMessage({ content: params.contentBlocks, source: { kind: 'user' } })
+    rec.handle.agent.steer(message)
+    return { messageId: message.id }
+  }
+
+  /**
    * Abort one known SDK session's active turn through its live agent. Queued
    * and steering work is cleared unless `keepInbox` preserves it (preserved
    * work stays parked until a later waking prompt claims it); with no active
@@ -223,6 +250,8 @@ export class HarnessSdkJsonRpcServer {
         return this.initialize(params as unknown as InitializeParams)
       case 'session/prompt':
         return this.prompt(params as unknown as SessionPromptParams)
+      case 'session/steer':
+        return this.steer(params as unknown as SessionSteerParams)
       case 'session/interrupt':
         return this.interrupt(params as unknown as SessionInterruptParams)
       case 'shutdown':

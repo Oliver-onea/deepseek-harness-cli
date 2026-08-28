@@ -264,6 +264,37 @@ describe('DeepSeekHarness', () => {
   })
 })
 
+describe('HarnessClient steer', () => {
+  it('sends the steering content verbatim and returns the spliced message id', async () => {
+    const dir = await tempDir('sdk-client-steer-')
+    const recordFile = join(dir, 'steers.jsonl')
+    const harness = harnessWith({ FAKE_RECORD_STEER: recordFile })
+    const session = harness.session('steerable')
+    await session.run('seed the session')
+    const messageId = await session.steer('adjust course')
+    expect(messageId).toBeTypeOf('string')
+    await harness.close()
+
+    const records = (await readFile(recordFile, 'utf8')).trim().split('\n')
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(records).toEqual([{
+      sessionId: 'steerable',
+      contentBlocks: [{ type: 'text', text: 'adjust course' }],
+    }])
+  })
+
+  it('rejects steering a session the runtime does not know', async () => {
+    const harness = harnessWith()
+    const failure = await harness.session('missing').steer('adjust').then(
+      () => { throw new Error('steer unexpectedly succeeded') },
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(JsonRpcResponseError)
+    expect((failure as JsonRpcResponseError).message).toContain('missing')
+    await harness.close()
+  })
+})
+
 describe('HarnessClient interrupt', () => {
   it('sends keepInbox on the wire only when given, and an idle session accepts the interrupt', async () => {
     const dir = await tempDir('sdk-client-interrupt-')

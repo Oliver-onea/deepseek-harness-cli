@@ -1,5 +1,5 @@
 /**
- * Named wire types for the DeepSeek Harness SDK runtime protocol: the four
+ * Named wire types for the DeepSeek Harness SDK runtime protocol: the five
  * request/result pairs and the four server-to-client notification payloads
  * exchanged over the newline-delimited JSON-RPC stdio transport. The server
  * plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share these shapes;
@@ -41,6 +41,23 @@ export interface SessionPromptParams {
 /** Durable enqueue receipt for one prompt. */
 export interface SessionPromptResult {
   /** Identity of the queued user message. */
+  messageId: string
+}
+
+/**
+ * Steer one SDK session: the content joins the running turn at its next step
+ * boundary, or opens the next turn when the session is idle.
+ */
+export interface SessionSteerParams {
+  /** The SDK-side session id; like `session/interrupt`, an unknown id fails instead of creating the session. */
+  sessionId: string
+  /** The steering content blocks, sent verbatim as the user message. */
+  contentBlocks: ContentBlock[]
+}
+
+/** Durable enqueue receipt for one steering message. */
+export interface SessionSteerResult {
+  /** Identity of the spliced `next-step` user message. */
   messageId: string
 }
 
@@ -121,6 +138,7 @@ export interface HarnessSdkNotificationMap {
 export interface HarnessSdkRequestMap {
   'initialize': { params: InitializeParams; result: InitializeResult }
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
+  'session/steer': { params: SessionSteerParams; result: SessionSteerResult }
   'session/interrupt': { params: SessionInterruptParams; result: SessionInterruptResult }
   'shutdown': { params: undefined; result: Record<string, never> }
 }

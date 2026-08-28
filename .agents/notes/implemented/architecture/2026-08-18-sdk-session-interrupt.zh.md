@@ -1,6 +1,6 @@
 # Agent Note: JSON-RPC SDK 协议的 `session/interrupt`
 
-Status: proposed
+Status: implemented
 
 [English](2026-08-18-sdk-session-interrupt.md) | 中文
 
@@ -10,7 +10,7 @@ JSON-RPC SDK 协议(`dsh-sdk-protocol` / `dsh-sdk-jsonrpc-server` / `dsh-sdk-cli
 
 决策中涉及排队工作的那一半,是 wire 设计者不能留作隐式的部分。`Agent.cancel` 默认清空收件箱;Web UI 则刻意保留它([web stop preserves queue](../../implemented/bug-fix/2026-07-31-web-stop-preserves-queue.md)),且被保留的工作保持停放,直到后续唤醒 prompt 认领它([cancel convergence wake latch](../../implemented/bug-fix/2026-08-07-cancel-convergence-wake-latch.md))。一个隐藏此选择的 wire 方法会把单一策略强加给所有客户端。
 
-## Proposal
+## Decision
 
 新增第四个请求 `session/interrupt`,形状仿照 `session/prompt`:params 携带目标 `sessionId`,result 是空的接受回执,进度通过既有的 `session.event` / `session.status` 通知观察,而不是通过响应。服务器在 wire 边界校验 params,将会话 id 解析到其活跃记录——未知 id 会响亮失败,返回点名该 id 的 JSON-RPC 错误;与 `session/prompt` 不同,interrupt 绝不创建会话——然后对它已持有的 agent 调用 `agent.cancel({ kind: 'user' }, { keepInbox })`。中断空闲会话是 `Agent.cancel` 文档约定的无操作,不会预置任何后续工作。
 
@@ -31,14 +31,14 @@ TypeScript 客户端在协议层增加 `HarnessClient.interrupt(sessionId, optio
 - **阻塞响应直到轮次收敛。** 这会把 wire 延迟耦合到 loop 内部(工具拆除、流中止传播),却不会给客户端带来好处——关心收敛的客户端本就订阅了 `session.status`。
 - **`DeepSeekHarness.run` 级别的取消句柄。** `run()` 在会话下一次空闲时结算并拥有自己的通知订阅;给它叠加按 run 的取消会重复会话句柄已提供的路由。`HarnessSession.interrupt` 以单一明确目标覆盖同样的会话。
 
-## Acceptance criteria
+## Verification
 
 - 客户端中断运行中的轮次并观察到它停止(`turn/end` 以 cause `{ kind: 'user' }` 中止,随后 `session.status` 空闲)——由经真实运行时的 `interrupt` 快照场景钉住。
 - 排队工作行为在 wire 上显式、在三份 SDK README 中均有文档,并双向测试:默认值丢弃已排队 prompt;`keepInbox: true` 将其停放,由后续唤醒 prompt 认领(`interrupt-keep-inbox` 快照)。
 - 中断空闲会话是无操作且不预置后续工作;未知会话 id 产生点名它的 JSON-RPC 错误;畸形 params 在 wire 边界拒绝而不触及 agent——均由 server 与 client 包测试覆盖。
 - 现有客户端不受影响:`initialize`、`session/prompt`、`shutdown` 行为与之前完全一致,从不调用 `session/interrupt` 的客户端看不到任何变化(SDK 与快照全套件保持绿色)。
 
-## Risks
+## Consequences
 
 - 停放队列语义(被保留的工作等待唤醒 prompt,而非自行恢复)可能让期待 Web 式立即继续的客户端意外;wire 文档与两份快照都明确陈述了它,而改变它将是 agent-loop 的决策,不是 SDK 的。
 - 在 Python SDK 获得自己的 interrupt 之前,两个 SDK 在一个协议方法上存在分歧;该差距记录在 README 中,以免 Python 用户对缺失的方法感到意外。

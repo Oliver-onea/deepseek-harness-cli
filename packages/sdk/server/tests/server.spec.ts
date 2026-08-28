@@ -108,6 +108,52 @@ async function mockHangingFirstCompletionServer(): Promise<{ url: string; reques
   return { url: `http://127.0.0.1:${address.port}`, requests }
 }
 
+/** Whether the observed stream logged the `next-step` inbox splice carrying the steering text. */
+function hasSteerReceipt(transport: FakeTransport, text: string): boolean {
+  return transport.notifications.some((n) => {
+    if (n.method !== 'session.event') return false
+    const event = n.params?.event as
+      | { type?: string; data?: { target?: string; inserted?: unknown[] } }
+      | undefined
+    if (event?.type !== 'agent/inbox/spliced' || event.data?.target !== 'next-step') return false
+    return JSON.stringify(event.data.inserted ?? []).includes(text)
+  })
+}
+
+/** SSE endpoint whose FIRST request holds after its first chunk until `release()`; later requests complete. */
+async function mockGatedFirstCompletionServer(): Promise<{ url: string; requests: unknown[]; release(): void }> {
+  const requests: unknown[] = []
+  let releaseFirst!: () => void
+  const gate = new Promise<void>((resolve) => { releaseFirst = resolve })
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    let body = ''
+    request.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+    request.on('end', () => {
+      requests.push(JSON.parse(body))
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: {"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":""}}]}\n\n')
+      const finish = (): void => {
+        response.write('data: {"choices":[{"delta":{"content":"done"}}]}\n\n')
+        response.write('data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\n')
+        response.write('data: [DONE]\n\n')
+        response.end()
+      }
+      // The first turn parks mid-stream until the test steers, giving the
+      // steering message a deterministic window before the step completes.
+      if (requests.length === 1) {
+        void gate.then(finish)
+        return
+      }
+      finish()
+    })
+  })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no port')
+  return { url: `http://127.0.0.1:${address.port}`, requests, release: releaseFirst }
+}
+
 async function makeHarness(storageDir: string) {
   const ctx = new Context()
   await ctx.plugin(agentCore, { workspaceContext: false })
@@ -432,6 +478,113 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(await server.handleRequest('session/interrupt', { sessionId: 'main', keepInbox: true })).toEqual({})
     expect(cancel).toHaveBeenLastCalledWith({ kind: 'user' }, { keepInbox: true })
     expect(cancel).toHaveBeenCalledTimes(2)
+    await server.shutdown()
+  })
+
+  it('joins a steering message into the running turn at its next step boundary', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-steer-'))
+    const llmServer = await mockGatedFirstCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const ctx = await makeHarness(storageDir)
+    try {
+      const transport = new FakeTransport()
+      const server = new HarnessSdkJsonRpcServer(ctx, transport)
+      await server.initialize({ cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' })
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'first' }] })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(1) })
+      // The first request parks mid-stream; the steer lands inside the turn.
+      const steer = await server.handleRequest('session/steer', {
+        sessionId: 'main',
+        contentBlocks: [{ type: 'text', text: 'prioritize tests' }],
+      })
+      expect(typeof (steer as { messageId: unknown }).messageId).toBe('string')
+      await vi.waitFor(() => { expect(hasSteerReceipt(transport, 'prioritize tests')).toBe(true) })
+      llmServer.release()
+
+      // Fresh steering extends the turn one more step, so the second model
+      // request carries the steering message and the turn completes once.
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['completed']) })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(2) })
+      const second = llmServer.requests[1] as { messages: unknown[] }
+      expect(JSON.stringify(second.messages)).toContain('prioritize tests')
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('opens the next turn when steering an idle session', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-steer-idle-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+    const ctx = await makeHarness(storageDir)
+    try {
+      const transport = new FakeTransport()
+      const server = new HarnessSdkJsonRpcServer(ctx, transport)
+      await server.initialize({ cwd: storageDir, provider: 'deepseek-official', model: 'dsagent-model' })
+
+      await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'first' }] })
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['completed']) })
+
+      // An idle steer is `Agent.steer`'s wakeup: it opens the next turn itself.
+      const steered = await server.handleRequest('session/steer', {
+        sessionId: 'main',
+        contentBlocks: [{ type: 'text', text: 'follow-up course' }],
+      })
+      expect(typeof (steered as { messageId: unknown }).messageId).toBe('string')
+      await vi.waitFor(() => { expect(turnEndReasons(transport)).toEqual(['completed', 'completed']) })
+      expect(llmServer.requests).toHaveLength(2)
+      const second = llmServer.requests[1] as { messages: unknown[] }
+      expect(JSON.stringify(second.messages)).toContain('follow-up course')
+      await server.shutdown()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('validates steer params at the wire boundary and fails loud on unknown sessions', async () => {
+    const steer = vi.fn<Agent['steer']>()
+    const followup = vi.fn<Agent['followup']>()
+    const agent = ({
+      id: SessionId('main'),
+      followup,
+      steer,
+    } satisfies Pick<Agent, 'id' | 'followup' | 'steer'>) as unknown as Agent
+    const handle = { agent, dispose: vi.fn(() => Promise.resolve()) }
+    const liveAgents = new Map<string, Agent>([['main', agent]])
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      agents: {
+        create: vi.fn(async () => handle),
+        get: (id: SessionId) => liveAgents.get(String(id)),
+      },
+      get: () => undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    await server.prompt({ sessionId: 'main', contentBlocks: [{ type: 'text', text: 'seed' }] })
+
+    // Malformed params and unknown ids never reach the agent, and a steer
+    // never creates the session.
+    await expect(server.handleRequest('session/steer', {}))
+      .rejects.toThrow('session/steer sessionId must be a string')
+    await expect(server.handleRequest('session/steer', { sessionId: 7 }))
+      .rejects.toThrow('session/steer sessionId must be a string')
+    await expect(server.handleRequest('session/steer', { sessionId: 'missing', contentBlocks: [] }))
+      .rejects.toThrow('unknown SDK session for session/steer: missing')
+    expect(steer).not.toHaveBeenCalled()
+
+    const result = await server.handleRequest('session/steer', {
+      sessionId: 'main',
+      contentBlocks: [{ type: 'text', text: 'course' }],
+    })
+    expect(typeof (result as { messageId: unknown }).messageId).toBe('string')
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect(steer.mock.calls[0]?.[0].content).toEqual([{ type: 'text', text: 'course' }])
     await server.shutdown()
   })
 

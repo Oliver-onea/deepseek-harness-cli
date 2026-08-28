@@ -20,6 +20,7 @@ import {
   type InitializeResult,
   type SessionInterruptParams,
   type SessionPromptParams,
+  type SessionSteerParams,
 } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { disposeRuntimeProcess } from './dispose.ts'
@@ -286,6 +287,23 @@ export class HarnessClient {
     const result = await this.request('session/prompt', { ...params })
     if (!isRecord(result) || typeof result.messageId !== 'string') {
       throw new SdkProtocolError(`session/prompt returned no message id: ${JSON.stringify(result)}`)
+    }
+    return result.messageId
+  }
+
+  /**
+   * Steer one session: the content joins the running turn at its next step
+   * boundary, or opens the next turn when the session is idle. A session the
+   * runtime does not know rejects with the wire error naming it.
+   * @param sessionId - target session; it must already exist server-side.
+   * @param contentBlocks - the steering message, sent verbatim.
+   * @returns the spliced message id.
+   */
+  async steer(sessionId: string, contentBlocks: ContentBlock[]): Promise<string> {
+    const params: SessionSteerParams = { sessionId, contentBlocks }
+    const result = await this.request('session/steer', { ...params })
+    if (!isRecord(result) || typeof result.messageId !== 'string') {
+      throw new SdkProtocolError(`session/steer returned no message id: ${JSON.stringify(result)}`)
     }
     return result.messageId
   }

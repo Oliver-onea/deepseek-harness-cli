@@ -38,6 +38,8 @@
  *   interrupt probe); the interrupt emits the aborted turn/end and idle status.
  * - `FAKE_RECORD_INTERRUPT`: append each `session/interrupt` params JSON to this
  *   file (interrupt wire probe).
+ * - `FAKE_RECORD_STEER`: append each `session/steer` params JSON to this file
+ *   (steer wire probe); the steer itself splices a `next-step` receipt.
  * - `FAKE_MALFORMED_INTERRUPT`: `session/interrupt` answers a non-object result
  *   (wire-validation probe).
  * - `FAKE_STREAM_THEN_MALFORMED`: stream a text chunk for the prompt, then
@@ -238,6 +240,27 @@ reader.on('line', (line) => {
       }
       runTurn(sessionId)
       notify('session.status', { sessionId, status: 'idle' })
+      respond({ messageId })
+      return
+    }
+    case 'session/steer': {
+      const sessionId = sessionIdOf(frame.params)
+      if (env.FAKE_RECORD_STEER !== undefined) appendFileSync(env.FAKE_RECORD_STEER, `${JSON.stringify(frame.params)}\n`)
+      if (!knownSessions.has(sessionId)) {
+        write({ jsonrpc: '2.0', id: frame.id, error: { code: -32603, message: `unknown SDK session for session/steer: ${sessionId}` } })
+        return
+      }
+      const messageId = `fake-steer-${seq}`
+      event(sessionId, 'agent/inbox/spliced', {
+        target: 'next-step',
+        start: 0,
+        inserted: [{
+          id: messageId,
+          role: 'user',
+          content: [],
+          source: { kind: 'user' },
+        }],
+      })
       respond({ messageId })
       return
     }
