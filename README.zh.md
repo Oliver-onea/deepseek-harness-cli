@@ -2,6 +2,20 @@
 
 [English](README.md) | 中文
 
+## 关于这个 fork
+
+本仓库是 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的个人 fork，**仅作学习与参考之用**。它已冻结、不再维护，也不是 `dsh` 的获取来源——请安装上游包。
+
+它在 `47f943859`（2026-08-13）离开上游，此后不再跟随。相对该点它新增了：
+
+- `packages/ui/tui` 与 `packages/bundle/tui-app`——全屏备用屏终端前门，作为默认的 `dsh --profile tui` 启动。
+- `packages/credentials/command-credential`——终端 `/credential` 命令。
+- JSON-RPC SDK 上的 `session/steer` 与 `approval/request`，以及 Python 客户端的对应方法。
+
+它缺少上游此后交付的全部内容：截至 2026-08-29 实测超过 10,000 个提交。上游此后已将启动器泛化，终端界面可作为树外插件安装（`dsh plugin --profile tui add <package>`），那才是本 fork 手工接线所做之事的受支持做法。
+
+曾在此提出的桌面客户端工作已转入独立仓库，其理由保留在[被否决的 Agent Note](.agents/notes/rejected/architecture/2026-08-28-tauri-desktop-shell.md) 中。
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它采用**一切皆插件**的架构，并由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper)。

@@ -1,6 +1,6 @@
 # Agent Note: A Tauri desktop shell over the web frontend
 
-Status: proposed
+Status: rejected — the desktop client moves to a separate repository as a provider of upstream's seams; this repository is frozen as a learning artifact and will not host the work
 
 English | [中文](2026-08-28-tauri-desktop-shell.zh.md)
 

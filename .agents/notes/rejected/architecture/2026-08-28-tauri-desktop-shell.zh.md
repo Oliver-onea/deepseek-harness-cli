@@ -1,6 +1,6 @@
 # Agent Note: 覆盖 web 前端的 Tauri 桌面外壳
 
-Status: proposed
+Status: rejected — 桌面客户端转入独立仓库，作为上游 seam 的 provider 实现；本仓库冻结为学习产物，不再承载该工作
 
 [English](2026-08-28-tauri-desktop-shell.md) | 中文
 

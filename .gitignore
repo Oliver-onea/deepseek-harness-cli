@@ -38,3 +38,6 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# Agent CLI resume/session logs dropped in the repository root.
+.kimi-resume.log
