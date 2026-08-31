@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { CallId, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { CommandId } from '@deepseek-ai/dsh-commands'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { Transcript } from '../src/transcript.ts'
 import type { AssistantEntry, NoticeEntry, ToolEntry, UserEntry } from '../src/transcript.ts'
+
+const imageRef: ImageAttachmentRef = {
+  attachmentId: AttachmentId('img-1'),
+  mediaType: 'image/png',
+  bytes: 1024,
+  width: 200,
+  height: 100,
+}
 
 /**
  * Folds REAL logged events: every event under test is appended to a genuine
@@ -54,6 +64,60 @@ describe('Transcript', () => {
     }), { surfaceOp: 'append' })
     expect(feed(event)).toBe(false)
     expect(transcript.entries).toEqual([])
+  })
+
+  it('folds an attached image into its own entry', () => {
+    const { session, transcript, feed } = log()
+    feed(session.append('user/message', createUserMessage({
+      content: [{ type: 'image', attachment: imageRef }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }))
+    expect(transcript.entries).toEqual([{ kind: 'image', ref: imageRef }])
+  })
+
+  it('draws prose and an attached image as separate ordered entries', () => {
+    const { session, transcript, feed } = log()
+    feed(session.append('user/message', createUserMessage({
+      content: [
+        { type: 'text', text: 'look at this' },
+        { type: 'image', attachment: imageRef },
+      ],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }))
+    expect(transcript.entries).toEqual([
+      { kind: 'user', text: 'look at this' },
+      { kind: 'image', ref: imageRef },
+    ])
+  })
+
+  it('joins text blocks split by an image into two user entries, not one', () => {
+    const { session, transcript, feed } = log()
+    feed(session.append('user/message', createUserMessage({
+      content: [
+        { type: 'text', text: 'before' },
+        { type: 'image', attachment: imageRef },
+        { type: 'text', text: 'after' },
+      ],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }))
+    expect(transcript.entries).toEqual([
+      { kind: 'user', text: 'before' },
+      { kind: 'image', ref: imageRef },
+      { kind: 'user', text: 'after' },
+    ])
+  })
+
+  it('drops a block that is neither text nor an image, without breaking the surrounding prose', () => {
+    const { session, transcript, feed } = log()
+    feed(session.append('user/message', createUserMessage({
+      content: [
+        { type: 'text', text: 'before' },
+        { type: 'tool-result', toolCallId: CallId('c1'), content: [{ type: 'text', text: 'x' }], isError: false },
+        { type: 'text', text: 'after' },
+      ],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }))
+    expect(transcript.entries).toEqual([{ kind: 'user', text: 'beforeafter' }])
   })
 
   it('draws an injected notice but not other injected context', () => {

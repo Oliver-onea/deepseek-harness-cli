@@ -6,6 +6,7 @@
  * @module @deepseek-ai/dsh-tui/transcript
  */
 
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { CallId } from '@deepseek-ai/dsh-llm/brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue, SessionEvent, TodoItem } from '@deepseek-ai/dsh-session'
@@ -19,6 +20,17 @@ import { displayLine, displayText } from './display-text.ts'
 export interface UserEntry {
   kind: 'user'
   text: string
+}
+
+/**
+ * A durable image the reader attached to their own turn. Only user-authored
+ * content draws inline: the current production adapters emit text-only
+ * assistant output, so an assistant or tool-result image block — forward
+ * compatible on the block type itself — contributes nothing here yet.
+ */
+export interface ImageEntry {
+  kind: 'image'
+  ref: ImageAttachmentRef
 }
 
 /** Committed or still-streaming assistant text. */
@@ -76,11 +88,11 @@ export interface HeaderEntry {
 }
 
 /** One drawable unit of the conversation, in append order. */
-export type TranscriptEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | HeaderEntry
+export type TranscriptEntry = UserEntry | AssistantEntry | ReasoningEntry | ToolEntry | NoticeEntry | HeaderEntry | ImageEntry
 
 /**
- * Join a message's text blocks. Reasoning is excluded: it has its own entry,
- * and an image contributes nothing a terminal line can carry.
+ * Join a message's text or reasoning blocks; the other collects images
+ * instead, so this reads only the two block types that ever produce one.
  * @param content - the message's content blocks.
  * @param type - the block type to collect.
  * @returns the joined text of the selected blocks.
@@ -91,6 +103,36 @@ function joinBlocks(content: readonly ContentBlock[], type: 'text' | 'reasoning'
     if (block.type === type) joined += block.text
   }
   return joined
+}
+
+/** One ordered piece a user message contributes: prose or one attached image. */
+type UserPart = { kind: 'text'; text: string } | { kind: 'image'; ref: ImageAttachmentRef }
+
+/**
+ * Split a user message's content into transcript entries in block order.
+ * Adjacent text blocks join into one part, and each image becomes its own,
+ * so a message that interleaves prose and pictures draws them in the order
+ * the reader attached them.
+ * @param content - the message's content blocks.
+ * @returns the ordered parts this message contributes.
+ */
+function splitUserParts(content: readonly ContentBlock[]): UserPart[] {
+  const parts: UserPart[] = []
+  let text = ''
+  const flushText = (): void => {
+    if (text !== '') parts.push({ kind: 'text', text })
+    text = ''
+  }
+  for (const block of content) {
+    if (block.type === 'text') {
+      text += block.text
+    } else if (block.type === 'image') {
+      flushText()
+      parts.push({ kind: 'image', ref: block.attachment })
+    }
+  }
+  flushText()
+  return parts
 }
 
 /**
@@ -247,8 +289,15 @@ export class Transcript {
   private appendUserMessage(message: SessionEvent<'user/message'>['data']): boolean {
     const source = message.source
     if (source.kind === 'user') {
-      const text = joinBlocks(message.content, 'text')
-      return text === '' ? false : this.push({ kind: 'user', text: displayText(text) })
+      // Every part below is a defined entry, so `push` always returns true here;
+      // what varies is whether the message contributed any part at all.
+      const parts = splitUserParts(message.content)
+      for (const part of parts) {
+        this.push(part.kind === 'text'
+          ? { kind: 'user', text: displayText(part.text) }
+          : { kind: 'image', ref: part.ref })
+      }
+      return parts.length > 0
     }
     if (source.kind === 'plugin' && source.form === 'notice') {
       return this.push({ kind: 'notice', tone: 'info', text: displayLine(source.summary) })
