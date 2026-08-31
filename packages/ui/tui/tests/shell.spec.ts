@@ -533,6 +533,9 @@ describe('TerminalShell', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
     })
     shell.start()

@@ -90,7 +90,7 @@ describe('TranscriptView', () => {
     const transcript = new Transcript()
     const items = transcript.entries as TranscriptEntry[]
     items.push({ kind: 'assistant', text: 'answer', streaming: false })
-    const view = new TranscriptView(transcript, { palette: createPalette(true, 'truecolor'), presenter: presenter() })
+    const view = new TranscriptView(transcript, { palette: createPalette(true, 'truecolor'), presenter: presenter(), images: imageOptions() })
     expect(view.render(40)[0]).toContain('\x1b[38;2;77;107;254m◆\x1b[39m')
   })
 
