@@ -18,6 +18,9 @@
       "path": "../../core/agent"
     },
     {
+      "path": "../../attachment/attachment"
+    },
+    {
       "path": "../../core/agent-default-model"
     },
     {

@@ -2829,13 +2829,19 @@ export interface Config {
   agentWaitTimeoutMs?: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions?: number
+  /** Whether to attempt inline image rendering at all; `false` always draws the text fallback. */
+  images?: boolean
+  /** Maximum inline image width in terminal cells. */
+  imageMaxWidthCells?: number
+  /** Maximum inline image height in terminal cells; unset keeps the image's own aspect ratio. */
+  imageMaxHeightCells?: number
 }
 
 /** The color depths the palette draws at, deepest first. */
 export type ColorDepth = 'truecolor' | '256' | '16'
 ```
 
-来源：[`packages/ui/tui/src/index.ts:79`](../packages/ui/tui/src/index.ts)
+来源：[`packages/ui/tui/src/index.ts:83`](../packages/ui/tui/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 

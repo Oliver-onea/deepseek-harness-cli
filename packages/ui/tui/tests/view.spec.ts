@@ -1,12 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetCapabilitiesCache, setCapabilities } from '@earendil-works/pi-tui'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { createPalette } from '../src/theme.ts'
 import { Transcript } from '../src/transcript.ts'
 import type { ToolOutcome, TranscriptEntry } from '../src/transcript.ts'
-import { TranscriptView, type ToolPresenter } from '../src/view.ts'
+import { TranscriptView, type AttachmentImageReader, type ImageViewOptions, type ToolPresenter } from '../src/view.ts'
 
 const palette = createPalette(false)
+
+const imageRef: ImageAttachmentRef = {
+  attachmentId: AttachmentId('img-1'),
+  mediaType: 'image/png',
+  bytes: 4,
+  width: 200,
+  height: 100,
+}
 
 /** A presenter that answers from fixed views and counts its lookups. */
 function presenter(over: Partial<ToolPresenter> = {}): ToolPresenter & { calls: number } {
@@ -22,13 +33,45 @@ function presenter(over: Partial<ToolPresenter> = {}): ToolPresenter & { calls: 
   return stub
 }
 
+/** Default image options: no reader, so every image draws its text fallback. */
+function imageOptions(over: Partial<ImageViewOptions> = {}): ImageViewOptions {
+  return {
+    reader: undefined,
+    maxWidthCells: 60,
+    maxHeightCells: undefined,
+    requestRender: () => {},
+    ...over,
+  }
+}
+
 /** A transcript whose entries are pushed directly, so the view is what is under test. */
-function viewOver(entries: TranscriptEntry[], tools: Partial<ToolPresenter> = {}): TranscriptView {
+function viewOver(
+  entries: TranscriptEntry[],
+  tools: Partial<ToolPresenter> = {},
+  images: Partial<ImageViewOptions> = {},
+): TranscriptView {
   const transcript = new Transcript()
   const items = transcript.entries as TranscriptEntry[]
   items.push(...entries)
-  return new TranscriptView(transcript, { palette, presenter: presenter(tools) })
+  return new TranscriptView(transcript, { palette, presenter: presenter(tools), images: imageOptions(images) })
 }
+
+/** A reader answering from a fixed byte payload, counting how many times it was asked. */
+function fixedReader(data: Uint8Array | Error): AttachmentImageReader & { calls: number } {
+  const stub = {
+    calls: 0,
+    async read(): Promise<Uint8Array> {
+      stub.calls += 1
+      if (data instanceof Error) throw data
+      return data
+    },
+  }
+  return stub
+}
+
+afterEach(() => {
+  resetCapabilitiesCache()
+})
 
 const outcome: ToolOutcome = { content: [{ type: 'text', text: 'done' }], isError: false }
 
@@ -47,7 +90,7 @@ describe('TranscriptView', () => {
     const transcript = new Transcript()
     const items = transcript.entries as TranscriptEntry[]
     items.push({ kind: 'assistant', text: 'answer', streaming: false })
-    const view = new TranscriptView(transcript, { palette: createPalette(true, 'truecolor'), presenter: presenter() })
+    const view = new TranscriptView(transcript, { palette: createPalette(true, 'truecolor'), presenter: presenter(), images: imageOptions() })
     expect(view.render(40)[0]).toContain('\x1b[38;2;77;107;254m◆\x1b[39m')
   })
 
@@ -177,5 +220,72 @@ describe('TranscriptView', () => {
   it('refuses an entry kind it does not draw', () => {
     const view = viewOver([{ kind: 'from-a-newer-build' } as unknown as TranscriptEntry])
     expect(() => view.render(40)).toThrow('unhandled transcript entry')
+  })
+
+  describe('inline images', () => {
+    it('renders the text fallback when the terminal has no image protocol', () => {
+      setCapabilities({ images: null, trueColor: false, hyperlinks: false })
+      const lines = viewOver([{ kind: 'image', ref: imageRef }]).render(40)
+      expect(lines.join('\n')).toMatch(/png/i)
+    })
+
+    it('carries a configured filename and max height into the fallback component', () => {
+      setCapabilities({ images: null, trueColor: false, hyperlinks: false })
+      const named: ImageAttachmentRef = { ...imageRef, name: 'chart.png' }
+      const lines = viewOver([{ kind: 'image', ref: named }], {}, { maxHeightCells: 20 }).render(40)
+      expect(lines.join('\n')).toContain('chart.png')
+    })
+
+    it('never asks the reader when the terminal has no image protocol', () => {
+      setCapabilities({ images: null, trueColor: false, hyperlinks: false })
+      const reader = fixedReader(new Uint8Array([1]))
+      viewOver([{ kind: 'image', ref: imageRef }], {}, { reader }).render(40)
+      expect(reader.calls).toBe(0)
+    })
+
+    it('renders the text fallback on a capable terminal when no attachment reader is composed', () => {
+      setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true })
+      expect(() => viewOver([{ kind: 'image', ref: imageRef }]).render(40)).not.toThrow()
+    })
+
+    it('loads bytes once on a capable terminal and asks for a redraw once they arrive', async () => {
+      setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true })
+      const reader = fixedReader(new Uint8Array([137, 80, 78, 71]))
+      const requestRender = vi.fn()
+      const view = viewOver([{ kind: 'image', ref: imageRef }], {}, { reader, requestRender })
+      view.render(40)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(reader.calls).toBe(1)
+      expect(requestRender).toHaveBeenCalledTimes(1)
+      view.render(40)
+      expect(reader.calls).toBe(1)
+    })
+
+    it('keeps the text fallback and settles quietly when the read fails', async () => {
+      setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true })
+      const reader = fixedReader(new Error('boom'))
+      const view = viewOver([{ kind: 'image', ref: imageRef }], {}, { reader })
+      view.render(40)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(reader.calls).toBe(1)
+      expect(() => view.render(40)).not.toThrow()
+      expect(reader.calls).toBe(1)
+    })
+
+    it('aborts an in-flight image read on dispose', () => {
+      setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true })
+      let signal: AbortSignal | undefined
+      const reader: AttachmentImageReader = {
+        read: (_ref, given) => {
+          signal = given
+          return new Promise(() => {})
+        },
+      }
+      const view = viewOver([{ kind: 'image', ref: imageRef }], {}, { reader })
+      view.render(40)
+      expect(signal?.aborted).toBe(false)
+      view.dispose()
+      expect(signal?.aborted).toBe(true)
+    })
   })
 })

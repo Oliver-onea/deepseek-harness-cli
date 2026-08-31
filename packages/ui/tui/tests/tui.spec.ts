@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Terminal } from '@earendil-works/pi-tui'
 import { Context } from '@deepseek-ai/cordis'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SubagentListEntry } from '@deepseek-ai/dsh-subagent'
@@ -119,16 +121,19 @@ describe('resolveTerminalConfig', () => {
         showReasoning: false,
         agentWaitTimeoutMs: tui.DEFAULT_AGENT_WAIT_TIMEOUT_MS,
         maxSuggestions: 8,
+        images: true,
+        imageMaxWidthCells: 60,
+        imageMaxHeightCells: undefined,
       })
   })
 
   it('keeps every stated setting', () => {
     expect(tui.resolveTerminalConfig({
       session: SESSION, color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
-      maxSuggestions: 3,
+      maxSuggestions: 3, images: false, imageMaxWidthCells: 40, imageMaxHeightCells: 20,
     })).toEqual({
       color: false, colorDepth: '256', headLines: 1, tailLines: 2, showReasoning: true, agentWaitTimeoutMs: 9,
-      maxSuggestions: 3,
+      maxSuggestions: 3, images: false, imageMaxWidthCells: 40, imageMaxHeightCells: 20,
     })
   })
 })
@@ -894,6 +899,34 @@ describe('createPresenter', () => {
     })
     tui.createPresenter(ctx, agent).presentResult('meta', '{}', { content: [], isError: false, meta: { a: 1 } })
     expect(seen).toEqual({ a: 1 })
+  })
+})
+
+describe('createImageReader', () => {
+  const ref: ImageAttachmentRef = { attachmentId: AttachmentId('img-1'), mediaType: 'image/png', bytes: 4, width: 2, height: 2 }
+
+  it('returns no reader when images are disabled', () => {
+    expect(tui.createImageReader(new Context(), false)).toBeUndefined()
+  })
+
+  it('returns no reader when the composition mounts no attachment store', () => {
+    expect(tui.createImageReader(new Context(), true)).toBeUndefined()
+  })
+
+  it('reads through the mounted attachment store and resolves to just the bytes', async () => {
+    const ctx = new Context()
+    const data = new Uint8Array([1, 2, 3])
+    let seen: { ref: ImageAttachmentRef; signal: AbortSignal } | undefined
+    ctx.provide('attachments', {
+      async readImage(readRef: ImageAttachmentRef, signal: AbortSignal) {
+        seen = { ref: readRef, signal }
+        return { ref: readRef, data }
+      },
+    } as unknown as AttachmentStore)
+    const reader = tui.createImageReader(ctx, true)
+    const controller = new AbortController()
+    await expect(reader?.read(ref, controller.signal)).resolves.toBe(data)
+    expect(seen).toEqual({ ref, signal: controller.signal })
   })
 })
 
