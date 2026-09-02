@@ -345,7 +345,9 @@ describe('the dsh terminal profile under a real PTY', () => {
   ])('prints one clean refusal with %s', async (_label, command) => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-tui-refusal-'))
     try {
-      const result = await runPty('/bin/zsh', ['-c', command], home)
+      // bash, not zsh (absent on Linux) and not /bin/sh (dash rejects
+      // `set -o pipefail`, which the piped-stdout case needs).
+      const result = await runPty('/bin/bash', ['-c', command], home)
       expect(result.exitCode).toBe(1)
       expect(result.raw.replaceAll('\r\n', '\n')).toBe(`${TTY_REFUSAL}\n`)
     } finally {

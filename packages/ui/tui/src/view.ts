@@ -6,12 +6,40 @@
  * @module @deepseek-ai/dsh-tui/view
  */
 
-import { Markdown, wrapTextWithAnsi, type Component, type MarkdownTheme } from '@earendil-works/pi-tui'
+import { getCapabilities, Image, Markdown, wrapTextWithAnsi, type Component, type MarkdownTheme } from '@earendil-works/pi-tui'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { renderToolCard, type CardLayout } from './tool-card.ts'
 import type { Palette } from './theme.ts'
 import { highlightCode } from './highlight.ts'
-import type { ToolEntry, ToolOutcome, Transcript, TranscriptEntry } from './transcript.ts'
+import type { ImageEntry, ToolEntry, ToolOutcome, Transcript, TranscriptEntry } from './transcript.ts'
+
+/**
+ * Reads a durable image's encoded bytes for inline rendering. Implemented by
+ * an adapter over `ctx.attachments`; its absence means every image draws its
+ * text fallback without attempting a read.
+ */
+export interface AttachmentImageReader {
+  /**
+   * Read one durable image's bytes.
+   * @param ref - the durable reference the transcript entry carries.
+   * @param signal - cancellation for the read, honored while it is in flight.
+   * @returns the raw encoded bytes.
+   */
+  read(ref: ImageAttachmentRef, signal: AbortSignal): Promise<Uint8Array>
+}
+
+/** How the view resolves and bounds inline images. */
+export interface ImageViewOptions {
+  /** Reads image bytes for a capable terminal; absent renders text fallbacks only. */
+  reader: AttachmentImageReader | undefined
+  /** Maximum inline image width in terminal cells. */
+  maxWidthCells: number
+  /** Maximum inline image height in terminal cells; unset keeps the image's own aspect ratio. */
+  maxHeightCells: number | undefined
+  /** Ask the host to redraw once a background image fetch settles. */
+  requestRender: () => void
+}
 
 /** The tool-presentation lookups the view needs, supplied by the plugin. */
 export interface ToolPresenter {
@@ -38,6 +66,17 @@ export interface TranscriptViewOptions {
   palette: Palette
   /** The tool-view lookups. */
   presenter: ToolPresenter
+  /** How to resolve and bound inline images. */
+  images: ImageViewOptions
+}
+
+/** One image entry's rendering state, kept across renders and width changes. */
+interface ImageState {
+  /** The pi-tui component this entry currently draws through. */
+  component: Image
+  /** Whether a load attempt has finished (successfully or not); a settled
+   * entry never triggers a second read. */
+  settled: boolean
 }
 
 /** One entry's last render, reused until its content or the width changes. */
@@ -78,31 +117,6 @@ function markdownTheme(palette: Palette): MarkdownTheme {
 }
 
 /**
- * A content fingerprint for one entry, cheap enough to compute every render.
- * @param entry - the transcript entry.
- * @returns a string that changes whenever the drawn content would.
- */
-function revisionOf(entry: TranscriptEntry): string {
-  switch (entry.kind) {
-    case 'user':
-    case 'notice':
-      return entry.text
-    case 'assistant':
-    case 'reasoning':
-      return `${entry.streaming ? '1' : '0'}${entry.text}`
-    case 'tool':
-      return `${entry.callId}:${entry.outcome === undefined ? 'run' : String(entry.outcome.isError)}:${entry.outcome?.content.length ?? 0}`
-    case 'header':
-      // The header is immutable once seeded.
-      return 'header'
-    // An entry kind this module cannot draw gets a constant fingerprint here
-    // and is refused by `drawEntry`, the single guard for the closed union.
-    default:
-      return ''
-  }
-}
-
-/**
  * Reject an entry kind this module does not draw.
  * @param entry - the unreachable value.
  * @returns never; always throws.
@@ -120,6 +134,8 @@ const MARKER_COLUMNS = 2
 /** The transcript, drawn. */
 export class TranscriptView implements Component {
   private readonly cache = new WeakMap<TranscriptEntry, CachedLines>()
+  private readonly images = new WeakMap<ImageEntry, ImageState>()
+  private readonly pendingReads = new Set<AbortController>()
   private readonly markdown: Markdown
   private readonly theme: MarkdownTheme
   /** Whether reasoning entries are drawn; toggled by a terminal control. */
@@ -144,6 +160,15 @@ export class TranscriptView implements Component {
   /** Drop every cached render; the next draw rebuilds from the fold. */
   invalidate(): void {
     this.markdown.invalidate()
+  }
+
+  /**
+   * Cancel every in-flight image read. Called when the owning shell tears
+   * down, so a torn-down screen never resolves into a view nothing draws.
+   */
+  dispose(): void {
+    for (const controller of this.pendingReads) controller.abort()
+    this.pendingReads.clear()
   }
 
   /**
@@ -185,7 +210,7 @@ export class TranscriptView implements Component {
    * @returns the entry's lines, including its trailing blank separator.
    */
   private linesFor(entry: TranscriptEntry, width: number): string[] {
-    const revision = revisionOf(entry)
+    const revision = this.revisionOf(entry)
     const cached = this.cache.get(entry)
     if (cached !== undefined
       && cached.width === width
@@ -201,6 +226,35 @@ export class TranscriptView implements Component {
       expanded: this.expanded,
     })
     return lines
+  }
+
+  /**
+   * A content fingerprint for one entry, cheap enough to compute every
+   * render. An image's fingerprint changes once its background read settles,
+   * so a fallback line drawn before the bytes arrived is not reused after.
+   * @param entry - the transcript entry.
+   * @returns a string that changes whenever the drawn content would.
+   */
+  private revisionOf(entry: TranscriptEntry): string {
+    switch (entry.kind) {
+      case 'user':
+      case 'notice':
+        return entry.text
+      case 'assistant':
+      case 'reasoning':
+        return `${entry.streaming ? '1' : '0'}${entry.text}`
+      case 'tool':
+        return `${entry.callId}:${entry.outcome === undefined ? 'run' : String(entry.outcome.isError)}:${entry.outcome?.content.length ?? 0}`
+      case 'header':
+        // The header is immutable once seeded.
+        return 'header'
+      case 'image':
+        return `${entry.ref.attachmentId}:${String(this.images.get(entry)?.settled ?? false)}`
+      // An entry kind this module cannot draw gets a constant fingerprint here
+      // and is refused by `drawEntry`, the single guard for the closed union.
+      default:
+        return ''
+    }
   }
 
   /**
@@ -224,6 +278,8 @@ export class TranscriptView implements Component {
         return entry.lines.flatMap(line => wrap(line, width))
       case 'tool':
         return this.drawTool(entry, width)
+      case 'image':
+        return this.drawImage(entry, width)
       // Closed union over this module's own entry vocabulary.
       default:
         return assertNever(entry)
@@ -245,6 +301,75 @@ export class TranscriptView implements Component {
     return body.map((line, index) => index === 0
       ? `${palette.accent(ASSISTANT_MARKER)} ${line}`
       : `${' '.repeat(MARKER_COLUMNS)}${line}`)
+  }
+
+  /**
+   * Build the pi-tui image component for one entry's current bytes, or its
+   * text-fallback placeholder while none have loaded yet.
+   * @param entry - the image entry to build for.
+   * @param data - the loaded bytes, or `undefined` before a read settles.
+   * @returns the component `drawImage` renders through.
+   */
+  private buildImage(entry: ImageEntry, data: Uint8Array | undefined): Image {
+    const ref = entry.ref
+    const images = this.options.images
+    return new Image(
+      data === undefined ? '' : Buffer.from(data).toString('base64'),
+      ref.mediaType,
+      { fallbackColor: this.options.palette.dim },
+      {
+        maxWidthCells: images.maxWidthCells,
+        ...images.maxHeightCells === undefined ? {} : { maxHeightCells: images.maxHeightCells },
+        ...ref.name === undefined ? {} : { filename: ref.name },
+      },
+      { widthPx: ref.width, heightPx: ref.height },
+    )
+  }
+
+  /**
+   * Draw one inline image, resolving its component lazily and dispatching a
+   * background byte read the first time a capable terminal draws it.
+   * @param entry - the image entry to draw.
+   * @param width - the viewport width in columns.
+   * @returns the image's lines: the placed graphic, or its text fallback.
+   */
+  private drawImage(entry: ImageEntry, width: number): string[] {
+    let state = this.images.get(entry)
+    if (state === undefined) {
+      state = { component: this.buildImage(entry, undefined), settled: false }
+      this.images.set(entry, state)
+      this.loadImage(entry, state)
+    }
+    return state.component.render(width)
+  }
+
+  /**
+   * Dispatch the one background read an image entry ever gets. A terminal
+   * with no image protocol, or a composition with no attachment reader, never
+   * reaches the store: the fallback already drew from the entry's own
+   * metadata, so no bytes are needed.
+   * @param entry - the image entry to load.
+   * @param state - its rendering state, mutated once the read settles.
+   */
+  private loadImage(entry: ImageEntry, state: ImageState): void {
+    const images = this.options.images
+    if (images.reader === undefined || getCapabilities().images === null) {
+      state.settled = true
+      return
+    }
+    const controller = new AbortController()
+    this.pendingReads.add(controller)
+    images.reader.read(entry.ref, controller.signal)
+      .then((data) => {
+        state.component = this.buildImage(entry, data)
+        state.settled = true
+        images.requestRender()
+      })
+      // A failed or cancelled read keeps the text fallback the component
+      // already renders from the entry's own metadata; nothing else can
+      // observe a background read, so there is nothing further to report.
+      .catch(() => { state.settled = true })
+      .finally(() => { this.pendingReads.delete(controller) })
   }
 
   /**

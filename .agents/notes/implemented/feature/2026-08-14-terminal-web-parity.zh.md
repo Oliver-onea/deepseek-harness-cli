@@ -12,11 +12,11 @@ Status: implemented
 
 输入 `/` 或 `@` 没有任何反应。Web 界面会在光标处识别这两个字符并给出分组候选菜单（[`ui-input-trigger`](../../../../packages/client/ui-input-trigger/README.md)），读者正是借此在不查文档的情况下发现命令、技能和文件引用。终端里，发现这件事根本没有入口。
 
-终端已经依赖一个提供了大部分缺失机制的框架。`dsh-tui` 从 `@earendil-works/pi-tui` 引入了 `Editor`、`ScrollView`、`Text`、`Loader`、`VStack`、`Markdown`、`TuiAltScreen`、`ProcessTerminal`、`matchesKey` 和 `wrapTextWithAnsi`。`Editor` 自带完整的自动补全——由 provider 驱动的建议、带防抖的查询、按键仲裁，以及用 shell 已传入主题绘制的编辑器内候选列表——因此输入触发不需要第二套菜单实现；`SelectList`、`SettingsList` 与 `Image` 仍未引入，它们属于第 C 层的界面。
+终端已经依赖一个提供了大部分缺失机制的框架。`dsh-tui` 从 `@earendil-works/pi-tui` 引入了 `Editor`、`ScrollView`、`Text`、`Loader`、`VStack`、`Markdown`、`TuiAltScreen`、`ProcessTerminal`、`matchesKey` 和 `wrapTextWithAnsi`。`Editor` 自带完整的自动补全——由 provider 驱动的建议、带防抖的查询、按键仲裁，以及用 shell 已传入主题绘制的编辑器内候选列表——因此输入触发不需要第二套菜单实现；`SelectList` 与 `SettingsList` 仍未引入，它们属于未来的第 C 层界面。pi-tui 同时也提供了 `Image` 及其配套的 `terminal-image` 模块——Kitty/iTerm2 图形协议编码、读取活跃终端自身环境的 `getCapabilities()` 能力探测，以及给两者都不支持的终端使用的 `imageFallback()` 文字——而 Web 界面自己的图片对齐目标（[`ui-attachment`](../../../../packages/client/ui-attachment/README.md)）在终端上完全没有对应实现。
 
 ## 决策
 
-DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可独立发布。**第 A 层与第 B 层已实现**；**第 C 层中模型选择已实现**，其余推迟如下。
+DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可独立发布。**第 A 层与第 B 层已实现**；**第 C 层中模型选择与行内图片已实现**，其余推迟如下。
 
 ### 第 C 层（模型选择）——终端模型选择器
 
@@ -25,6 +25,16 @@ DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可�
 强度选择随同一命令提供，以面板状态加参数形式对应 Web composer 的两级 Model/Effort 拾取：在声明了强度的路由上按 `→` 打开该路由的强度层（模型默认值加上每个已声明的强度，即将生效的强度带标记；`esc` 返回模型列表且光标保持不变 —— 强度层是同一个面板的状态而非嵌套面板，因此 shell 的面板计数按键防护同时覆盖两者），`/model <route> <effort>` 直接固定一个已公布的强度，`/model <route> default` 请求适配器默认值；适配器未声明强度的路由不提供强度层、不可下钻，并在拾取时拒绝任何强度参数，未知强度列出可选项而不是拖到请求时才失败。不带强度的模型拾取遵循 Web composer `selectionOf` 的规则 —— 重新拾取当前路由保留其强度，切换路由采用新模型的默认值 —— 且切换提示指名被替换的强度（`was <effort>`），因为存储的用户配置节无法区分显式强度与物化强度。`default` 拾取不安装强度，因此每次请求解析适配器的实时默认值，而持久化配置节中缺失的强度清除已存储的强度。
 
 选择本身在每次读取时通过与 Web 端 `selectionFor` 相同的三层解析：先本进程内的拾取，其次会话的最后一个已记录请求头，再次是启动固定值或部署默认值（按读取时活跃状态取值）。正是这条读取路径使 `dsh --resume <session>` 能够恢复会话中途切换的路由：日志中的请求头优先于创建选项，而空白会话能读到创建之后保存的默认值。页脚与窗格标题在切换生效的那一刻重述路由 —— 并且在重放已恢复日志的 `request/context` 之后同样重述 —— 而连一行候选都放不下的终端上面板让位，并给出直接选择形式的提示。
+
+### 第 C 层（行内图片）——能力对齐，而非布局对齐
+
+Web 界面的 [`ui-attachment`](../../../../packages/client/ui-attachment/README.md) 把消息中的图片行内渲染（`MessageImage`/`ImageGallery`），并配有原始尺寸的灯箱；终端对同一能力的呈现是图片本身——在存在图形协议的地方绘制，其余场合则给出文字描述——绝不会是终端支撑不了的布局，也绝不会什么都没有。`dsh-tui` 的会话记录折叠现在会为用户消息携带的每个 `image` 类型内容块生成一个 `image` 条目，按读者附加的顺序与文本条目交错排列；`TranscriptView` 通过 pi-tui 自带的 `Image` 组件绘制该条目，而非自行实现编码器，这也是本包能继续遵守下文 `displayText()` 规则、不必新增第二处产出 ANSI 的地方的原因。
+
+能力是读取来的，从不是假设出来的：pi-tui 的 `getCapabilities()` 每个进程探测一次活跃终端自身的环境（`TERM`、`TERM_PROGRAM`、tmux 超链接转发），对既不支持 Kitty 也不支持 iTerm2 图形协议的终端——普通 xterm、大多数未开启 Kitty 透传的 `tmux`/`screen` 会话，或丢失了该协议所需 `TERM` 的 SSH 跳转——则改为绘制 pi-tui 自带的 `imageFallback()` 文字（媒体类型、像素尺寸、文件名）。持久引用自身的元数据（`width`、`height`、`mediaType`、`name`）已足够绘制该回退，完全不必访问附件存储，因此不支持图形协议的终端、或没有组合附件读取器的合成都不会发起读取。只有在能力具备且组合了读取器的终端上，才会为每张图片派发一次后台 `ctx.attachments.readImage()`，在其落定之前持续绘制已算好的回退，落定后重新绘制；失败或被取消的读取仍停在回退上而不呈现错误，因为回退本身已是一个完整的答案。`images: false` 配置会完全跳过探测与读取，这是给代理或录制管线的固定部署选择，使其无论终端实际具备什么能力都绝不会收到图形转义序列。
+
+图片与对话记录争夺行数的方式，和一张很长的工具卡片或助手消息并无二致，答案也一样：它们滚动，而不是隐藏。把 `/`、`@` 与模型选择菜单在尺寸低于阈值时隐藏的行阈值模式之所以存在，是因为那些是会捕获按键的固定浮层——一个被部分裁切的菜单看起来仍然可信，却会派发错误的候选项。对话记录不是浮层，而是整场对话本就生活其中的滚动区域，pi-tui 自身的滚动计量（`cropKittyImageLine`，接入其按行计算的视口）会在视口边缘裁切一张已放置的 Kitty 图片，与裁切其他任何长条目完全一样。装不下整张图片的终端会显示其中一部分并可滚动查看其余部分，与一条很长的工具结果相同；它不会像 20×5 的终端整个丢失 `/` 菜单那样丢失图片。
+
+只有用户附加的图片会这样绘制。`ImageBlock` 本身与角色无关，一个工具（`read_image`）的结果里已经返回过一个，但目前没有任何适配器会产出助手方的图片，`read_image` 的卡片是 `generic`，没有具备图片能力的展示器——要扩展 `tool-card.ts` 的正文渲染器以放置图片，需要像现在的会话记录视图那样自建一份按条目缓存的组件，而目前没有任何生产者需要它，因此这部分留在本次改动之外（[当前所有者与需求惯例](../../../../packages/AGENTS.md)）。
 
 ### 第 A 层——把已经可用的东西显示出来
 
@@ -83,6 +93,6 @@ DeepSeek Harness 分三层交付终端与 Web 界面的能力对齐，每层可�
 
 ## 推迟
 
-**第 C 层——其余的终端画面。** 此处每一项都需要终端尚不具备的界面：[`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md)、[`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md)、[`ui-workspace`](../../../../packages/client/ui-workspace/README.md)、[`ui-jobs`](../../../../packages/client/ui-jobs/README.md)、[`ui-subagent`](../../../../packages/client/ui-subagent/README.md)、[`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md)、[`ui-attachment`](../../../../packages/client/ui-attachment/README.md)，以及 `ui-settings` 系列。其中两项可以关闭 `dsh-tui` 仍记录为推迟的限制：缺失的会话切换器与行内图片，后者以 pi-tui 的 `Image` 组件为机制。同样推迟的还有编辑器层的触发检测本身（行中的 `/`、标点后的 `@`、后续行上的触发符、分组小标题），那需要一个支持它们的编辑器。
+**第 C 层——其余的终端画面。** 此处每一项都需要终端尚不具备的界面：[`ui-trajectory`](../../../../packages/client/ui-trajectory/README.md)、[`ui-sidebar`](../../../../packages/client/ui-sidebar/README.md)、[`ui-workspace`](../../../../packages/client/ui-workspace/README.md)、[`ui-jobs`](../../../../packages/client/ui-jobs/README.md)、[`ui-subagent`](../../../../packages/client/ui-subagent/README.md)、[`ui-deliverables`](../../../../packages/client/ui-deliverables/README.md)，以及 `ui-settings` 系列。其中一项可以关闭 `dsh-tui` 仍记录为推迟的限制：缺失的会话切换器。`ui-attachment` 的行内图片能力已针对用户附加的图片实现（见上文）；助手方或工具结果方的图片（`read_image` 的结果）仍是纯文字，留待有实际需求的生产者出现时再推进。同样推迟的还有编辑器层的触发检测本身（行中的 `/`、标点后的 `@`、后续行上的触发符、分组小标题），那需要一个支持它们的编辑器。
 
 启动时的会话恢复选择器 —— 会话切换的发现那一半，也是切换器否决所推荐的后续工作 —— 已另行实现（[启动时的会话恢复选择器](2026-08-18-tui-launch-resume-picker.md)）；它消除了启动时必须知道会话 id 的要求，但没有关闭终端内切换器这一项。

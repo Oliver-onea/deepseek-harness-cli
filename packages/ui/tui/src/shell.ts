@@ -31,7 +31,7 @@ import { renderStatus } from './status.ts'
 import type { StatusGoal, StatusPlanMode } from './status.ts'
 import type { ColorDepth, Palette } from './theme.ts'
 import { Transcript } from './transcript.ts'
-import { TranscriptView, type ToolPresenter } from './view.ts'
+import { TranscriptView, type AttachmentImageReader, type ToolPresenter } from './view.ts'
 
 /** Everything the shell needs from the composition around it. */
 export interface ShellOptions {
@@ -61,6 +61,12 @@ export interface ShellOptions {
   tailLines: number
   /** Whether reasoning starts visible. */
   showReasoning: boolean
+  /** Reads image bytes for inline rendering; absent renders every image's text fallback. */
+  imageReader: AttachmentImageReader | undefined
+  /** Maximum inline image width in terminal cells. */
+  imageMaxWidthCells: number
+  /** Maximum inline image height in terminal cells; unset keeps the image's own aspect ratio. */
+  imageMaxHeightCells: number | undefined
   /**
    * The deployment's default route, shown until the session's first request
    * logs the one it actually used. Absent when the composition mounts no
@@ -155,6 +161,12 @@ export class TerminalShell implements PanelHost {
     this.view = new TranscriptView(this.transcript, {
       palette: options.palette,
       presenter: options.presenter,
+      images: {
+        reader: options.imageReader,
+        maxWidthCells: options.imageMaxWidthCells,
+        maxHeightCells: options.imageMaxHeightCells,
+        requestRender: () => { this.options.tui.requestRender() },
+      },
     })
     this.view.reasoning = options.showReasoning
     this.view.layout = { headLines: options.headLines, tailLines: options.tailLines, expanded: false }
@@ -313,6 +325,7 @@ export class TerminalShell implements PanelHost {
     content += ' '.repeat(Math.max(0, gutter - visibleWidth(content)))
     const editorLines = this.editor.render(Math.max(1, width - gutter))
     const blank = ' '.repeat(gutter)
+    /* v8 ignore next -- the editor borders make a real render at least two lines, so the marker row is always 1 */
     const markerRow = editorLines.length >= 2 ? 1 : 0
     return editorLines.map((line, index) => (index === markerRow ? content : blank) + line)
   }
@@ -356,6 +369,11 @@ export class TerminalShell implements PanelHost {
   /** Ask the renderer to draw again. */
   requestRender(): void {
     this.options.tui.requestRender()
+  }
+
+  /** Cancel every in-flight image read; called when the plugin tears down. */
+  dispose(): void {
+    this.view.dispose()
   }
 
   /**

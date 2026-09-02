@@ -59,8 +59,10 @@ describe('QuestionPanel', () => {
     expect(lines[0]).toBe('Scope')
     expect(lines[1]).toBe('Which one?')
     expect(lines[2]).toBe('pick one')
-    expect(lines[3]).toBe(' 1. ○ First')
-    expect(lines[4]).toBe(' 2. ○ Second — the other one')
+    // The cursor row opens with the marker, the rest with the blank gutter it
+    // replaces, so the cursor reads by shape where color cannot carry it.
+    expect(lines[3]).toBe('▸ 1. ○ First')
+    expect(lines[4]).toBe('  2. ○ Second — the other one')
     expect(lines[5]).toBe('↑↓ move  tab type an answer  enter answer  esc cancel')
   })
 
@@ -101,7 +103,7 @@ describe('QuestionPanel', () => {
   it('ignores a number with no option behind it', () => {
     const { panel } = panelFor([choice()])
     panel.handleInput('7')
-    expect(panel.render(80)[1]).toBe(' 1. ○ First')
+    expect(panel.render(80)[1]).toBe('▸ 1. ○ First')
   })
 
   it('keeps one choice for a single-select question', () => {
@@ -183,7 +185,7 @@ describe('QuestionPanel', () => {
     const { panel } = panelFor([choice({ options: many })])
     const lines = panel.render(80)
     expect(lines[9]).toContain(' 9. ')
-    expect(lines[10]).toBe('    ○ Option 9')
+    expect(lines[10]).toBe('     ○ Option 9')
   })
 
   it('offers option navigation again once the reader leaves the answer field', () => {

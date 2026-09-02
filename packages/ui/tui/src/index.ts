@@ -21,6 +21,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 // Empty type imports carry the Context merges this plugin reads optionally.
 import type {} from '@deepseek-ai/cordis-plugin-timer'
+import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-commands'
@@ -35,10 +36,10 @@ import { childDisplayName, childRunning, type MenuSkill, type RunningChild } fro
 import { helpText } from './command-help.ts'
 import { runModelCommand } from './model-picker.ts'
 import { TerminalQuestions } from './questions.ts'
-import { createPalette, detectColorDepth, type ColorDepth } from './theme.ts'
+import { createPalette, detectColorDepth, type ColorDepth, type Palette } from './theme.ts'
 import { TerminalShell, paneTitle } from './shell.ts'
 import type { ToolOutcome } from './transcript.ts'
-import type { ToolPresenter } from './view.ts'
+import type { AttachmentImageReader, ToolPresenter } from './view.ts'
 
 export type { CardLayout, ToolCard } from './tool-card.ts'
 export type * from './transcript.ts'
@@ -73,6 +74,9 @@ const DEFAULT_TAIL_LINES = 4
 /** Candidate rows the input-trigger menus show before scrolling, by default. */
 const DEFAULT_MAX_SUGGESTIONS = 8
 
+/** Maximum inline image width in terminal cells, by default. */
+const DEFAULT_IMAGE_MAX_WIDTH_CELLS = 60
+
 /** Default bound for waiting on the composition's configured agent. */
 export const DEFAULT_AGENT_WAIT_TIMEOUT_MS = 30_000
 /** Plugin config. */
@@ -99,6 +103,12 @@ export interface Config {
   agentWaitTimeoutMs?: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions?: number
+  /** Whether to attempt inline image rendering at all; `false` always draws the text fallback. */
+  images?: boolean
+  /** Maximum inline image width in terminal cells. */
+  imageMaxWidthCells?: number
+  /** Maximum inline image height in terminal cells; unset keeps the image's own aspect ratio. */
+  imageMaxHeightCells?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -111,6 +121,9 @@ export const Config: z<Config> = z.object({
   task: z.string(),
   agentWaitTimeoutMs: z.number().step(1).min(1).default(DEFAULT_AGENT_WAIT_TIMEOUT_MS),
   maxSuggestions: z.natural().min(1).default(DEFAULT_MAX_SUGGESTIONS),
+  images: z.boolean().default(true),
+  imageMaxWidthCells: z.natural().min(1).default(DEFAULT_IMAGE_MAX_WIDTH_CELLS),
+  imageMaxHeightCells: z.natural().min(1),
 })
 
 /** The terminal settings after defaulting: what {@link TerminalShell} reads. */
@@ -129,6 +142,12 @@ export interface ResolvedConfig {
   agentWaitTimeoutMs: number
   /** Candidate rows the `/` and `@` menus show before scrolling. */
   maxSuggestions: number
+  /** Whether to attempt inline image rendering at all. */
+  images: boolean
+  /** Maximum inline image width in terminal cells. */
+  imageMaxWidthCells: number
+  /** Maximum inline image height in terminal cells; unset keeps the image's own aspect ratio. */
+  imageMaxHeightCells: number | undefined
 }
 
 /**
@@ -148,6 +167,9 @@ export function resolveTerminalConfig(config: Config): ResolvedConfig {
     showReasoning: config.showReasoning ?? false,
     agentWaitTimeoutMs: config.agentWaitTimeoutMs ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS,
     maxSuggestions: config.maxSuggestions ?? DEFAULT_MAX_SUGGESTIONS,
+    images: config.images ?? true,
+    imageMaxWidthCells: config.imageMaxWidthCells ?? DEFAULT_IMAGE_MAX_WIDTH_CELLS,
+    imageMaxHeightCells: config.imageMaxHeightCells,
   }
 }
 
@@ -169,6 +191,26 @@ export function resolveColorDepth(
   if (!color || colorDepth === 'none') return undefined
   if (colorDepth === 'auto') return detectColorDepth(env)
   return colorDepth
+}
+
+/**
+ * Build the terminal palette from the configured color flag, the configured
+ * depth, and the live terminal environment. A `colorDepth` of `none` pins the
+ * colorless rung even when `color` is on, so the palette stays identity-styled
+ * — emitting no SGR of its own — rather than dropping through to the 16-color
+ * tier the resolved `undefined` depth would otherwise default to.
+ * @param color - whether to emit SGR sequences at all.
+ * @param colorDepth - the configured depth or `auto`.
+ * @param env - the terminal environment.
+ * @returns the role-keyed styles the renderer uses.
+ */
+export function createTerminalPalette(
+  color: boolean,
+  colorDepth: 'auto' | ColorDepth | 'none',
+  env: { COLORTERM?: string | undefined; TERM?: string | undefined },
+): Palette {
+  const depth = resolveColorDepth(color, colorDepth, env)
+  return createPalette(depth !== undefined, depth ?? '16')
 }
 
 /**
@@ -271,6 +313,26 @@ export function createPresenter(ctx: Context, agent: Agent): ToolPresenter {
 }
 
 /**
+ * Adapt the optional attachment store into the reader the transcript view
+ * reads for inline images. Absent when the composition mounts no attachment
+ * store, or when `images` config disables the feature outright — either way,
+ * every image entry draws its text fallback instead of attempting a read.
+ * @param ctx - plugin context carrying the optional attachment service.
+ * @param enabled - whether the composition allows inline images at all.
+ * @returns the reader the shell installs, or `undefined` to force the text fallback.
+ */
+export function createImageReader(ctx: Context, enabled: boolean): AttachmentImageReader | undefined {
+  if (!enabled) return undefined
+  const attachments = ctx.get('attachments')
+  if (attachments === undefined) return undefined
+  return {
+    async read(ref, signal) {
+      return (await attachments.readImage(ref, signal)).data
+    },
+  }
+}
+
+/**
  * Resolve the route this session's requests use when nothing stronger names
  * one: what the composition configured for this agent, else the deployment
  * default. A route with neither leaves the selection unset, and the adapter's
@@ -354,7 +416,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
   if (agent === undefined) return
 
   const depth = resolveColorDepth(settings.color, settings.colorDepth, process.env)
-  const palette = createPalette(settings.color, depth ?? '16')
+  const palette = createTerminalPalette(settings.color, settings.colorDepth, process.env)
   const defaultRoute = ctx.get('agentDefaultModel')?.currentSelection()
   // The selection is agent-scoped state this front door owns: it fills the
   // persona's `{{provider}}`/`{{model}}` variables and routes each request.
@@ -392,6 +454,9 @@ async function start(ctx: Context, config: Config): Promise<void> {
     headLines: settings.headLines,
     tailLines: settings.tailLines,
     showReasoning: settings.showReasoning,
+    imageReader: createImageReader(ctx, settings.images),
+    imageMaxWidthCells: settings.imageMaxWidthCells,
+    imageMaxHeightCells: settings.imageMaxHeightCells,
     defaultRoute,
     autocomplete: {
       commands: commands === undefined ? () => [] : () => commands.list(agent),
@@ -423,6 +488,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
     terminal.setTitle(paneTitle(shell.model))
     yield () => {
       shell.stopStatus()
+      shell.dispose()
       tui.stop()
     }
   }, 'dsh-tui.screen')

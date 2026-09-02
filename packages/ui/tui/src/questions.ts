@@ -15,6 +15,7 @@ import type {
   UserQuestionProvider,
 } from '@deepseek-ai/dsh-user-questions'
 import { displayLine, displayText } from './display-text.ts'
+import { cursorRow } from './theme.ts'
 import type { Palette } from './theme.ts'
 
 /** The terminal surface a panel needs to appear on and be redrawn. */
@@ -156,8 +157,8 @@ export class QuestionPanel implements Component {
       const text = option.description === undefined
         ? displayLine(option.label)
         : `${displayLine(option.label)} — ${displayLine(option.description)}`
-      const row = ` ${number} ${chosen} ${text}`.slice(0, width)
-      return !this.state.typing && position === this.state.cursor ? palette.selected(row) : row
+      const row = `  ${number} ${chosen} ${text}`.slice(0, width)
+      return cursorRow(row, !this.state.typing && position === this.state.cursor, palette)
     })
   }
 

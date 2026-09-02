@@ -200,3 +200,28 @@ export function createPalette(color: boolean, depth: ColorDepth = '16'): Palette
   }
   return { ...TIERS[depth] }
 }
+
+/** The glyph that names the cursor row in a list, in the row's first column. */
+const CURSOR_MARKER = '▸'
+
+/**
+ * Decorate one list row for its cursor state.
+ *
+ * The marker is what carries the cursor when color cannot. `selected` is the
+ * identity function at the colorless rung, so reverse video alone leaves every
+ * row of the `/model` picker and the question panel identical under
+ * `--no-color`, with nothing to say which row `enter` applies to. Color and
+ * shape encode the same state at the rungs that have color, which is what keeps
+ * one reading correct at all of them.
+ *
+ * The marker replaces the row's first column rather than widening it, so the
+ * caller's alignment and its `slice` to the panel width both still hold. Rows
+ * reaching here open with a space for exactly that reason.
+ * @param row - the row text, already truncated to the panel width.
+ * @param isCursor - whether this is the row `enter` applies to.
+ * @param palette - the styles to draw with.
+ * @returns the row, marked and styled when it is the cursor.
+ */
+export function cursorRow(row: string, isCursor: boolean, palette: Palette): string {
+  return isCursor ? palette.selected(`${CURSOR_MARKER}${row.slice(CURSOR_MARKER.length)}`) : row
+}

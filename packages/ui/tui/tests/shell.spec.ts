@@ -1,13 +1,24 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetCapabilitiesCache, setCapabilities } from '@earendil-works/pi-tui'
 import type { Component, OverlayHandle, Terminal, ViewportTUI } from '@earendil-works/pi-tui'
 import type { Agent, AgentCancelCause } from '@deepseek-ai/dsh-agent'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { CommandId, type CommandRuntime } from '@deepseek-ai/dsh-commands'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { TerminalShell, classifySubmission, commandNameOf, paneTitle } from '../src/shell.ts'
 import type { AutocompleteOptions, MenuSkill } from '../src/autocomplete.ts'
 import { createPalette } from '../src/theme.ts'
-import type { ToolPresenter } from '../src/view.ts'
+import type { AttachmentImageReader, ToolPresenter } from '../src/view.ts'
+
+const imageRef: ImageAttachmentRef = {
+  attachmentId: AttachmentId('img-1'),
+  mediaType: 'image/png',
+  bytes: 4,
+  width: 200,
+  height: 100,
+}
 
 const ESCAPE = '\x1b'
 
@@ -130,6 +141,9 @@ function shellWithMenus(over: { rows?: number; children?: { name: string }[]; sk
     headLines: 4,
     tailLines: 2,
     showReasoning: false,
+    imageReader: undefined,
+    imageMaxWidthCells: 60,
+    imageMaxHeightCells: undefined,
     defaultRoute: undefined,
     autocomplete: {
       commands: () => roster,
@@ -170,6 +184,9 @@ function shellFor(over: {
     headLines: 4,
     tailLines: 2,
     showReasoning: false,
+    imageReader: undefined,
+    imageMaxWidthCells: 60,
+    imageMaxHeightCells: undefined,
     defaultRoute: undefined,
     autocomplete: over.autocomplete,
   })
@@ -274,13 +291,13 @@ describe('TerminalShell', () => {
     const withDefault = new TerminalShell({
       tui, agent: bare, palette: createPalette(false), presenter,
       commands: undefined, tokenMeter: undefined, headLines: 4, tailLines: 2,
-      showReasoning: false, defaultRoute: { provider: 'd', model: 'dm' },
+      showReasoning: false, imageReader: undefined, imageMaxWidthCells: 60, imageMaxHeightCells: undefined, defaultRoute: { provider: 'd', model: 'dm' },
     })
     expect(withDefault.model).toBe('dm')
     const withNothing = new TerminalShell({
       tui, agent: bare, palette: createPalette(false), presenter,
       commands: undefined, tokenMeter: undefined, headLines: 4, tailLines: 2,
-      showReasoning: false, defaultRoute: undefined,
+      showReasoning: false, imageReader: undefined, imageMaxWidthCells: 60, imageMaxHeightCells: undefined, defaultRoute: undefined,
     })
     expect(withNothing.model).toBe('default')
   })
@@ -434,6 +451,25 @@ describe('TerminalShell', () => {
     expect(agent.followups).toHaveLength(1)
   })
 
+  it('ships a skill line to the model even when the skill catalog read fails', async () => {
+    // The catalog is what decides whether a slash line is a skill; a read
+    // that throws must not turn the invocation into a command error, so the
+    // shell falls open and the line still reaches the model as a prompt.
+    const commands = { find: () => undefined, execute: vi.fn() } as unknown as CommandRuntime
+    const autocomplete: AutocompleteOptions = {
+      commands: () => [],
+      skills: () => Promise.reject(new Error('catalog unreadable')),
+      maxVisible: 8,
+    }
+    const { shell, tui, agent } = shellFor({ commands, autocomplete })
+    shell.start()
+    await submit(tui, '/review')
+    expect(agent.followups).toHaveLength(1)
+    expect(agent.followups[0]?.content).toEqual([{ type: 'text', text: '/review' }])
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).not.toContain('Unknown command')
+  })
+
   it('prompts the model when the composition mounts no command registry', async () => {
     const { shell, tui, agent } = shellFor()
     shell.start()
@@ -469,6 +505,9 @@ describe('TerminalShell', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
     })
     shell.refreshStatus()
@@ -513,6 +552,9 @@ describe('TerminalShell', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
     })
     shell.start()
@@ -545,6 +587,36 @@ describe('TerminalShell', () => {
     expect(narrow).not.toContain('›')
   })
 
+  it('forwards a layout invalidation into the composed editor row', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const editor = tui.focused as unknown as { invalidate: () => void }
+    const invalidated = vi.spyOn(editor, 'invalidate')
+    // The layout root is the real VStack/ScrollView composition: an
+    // invalidation propagates containers' children, so the input row's own
+    // invalidate — the editor — must hear it.
+    ;(tui.layoutRoot as Component).invalidate()
+    expect(invalidated).toHaveBeenCalled()
+  })
+
+  it('keeps the prompt marker on the input row once the input spans two lines', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const editor = tui.focused as unknown as { handleInput(data: string): void }
+    editor.handleInput('x')
+    editor.handleInput('\x0a')
+    editor.handleInput('y')
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80)
+    const xRow = drawn.findIndex(line => line.includes('x'))
+    const yRow = drawn.findIndex(line => line.includes('y'))
+    expect(xRow).toBeGreaterThanOrEqual(0)
+    expect(yRow).toBe(xRow + 1)
+    // Row 1 carries the marker; the gutter above stays blank.
+    expect(drawn[xRow]).toMatch(/^›/u)
+    expect(drawn[yRow]).not.toContain('›')
+    expect(drawn[yRow]).toMatch(/^ {2}/u)
+  })
+
   it('reflects changing goal state without a new session event', () => {
     let goal: { objective: string; phase: string } | undefined = { objective: 'first', phase: 'active' }
     const { shell, tui } = shellFor({ state: { goal: () => goal } })
@@ -555,6 +627,43 @@ describe('TerminalShell', () => {
     shell.refreshStatus()
     const after = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
     expect(after).not.toContain('goal:')
+  })
+})
+
+describe('TerminalShell images', () => {
+  afterEach(() => {
+    resetCapabilitiesCache()
+  })
+
+  it('requests a redraw once a background image read settles', async () => {
+    setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true })
+    const reader: AttachmentImageReader = { read: async () => new Uint8Array([137, 80, 78, 71]) }
+    const tui = fakeTui()
+    const agent = fakeAgent()
+    const shell = new TerminalShell({
+      tui,
+      agent,
+      palette: createPalette(false),
+      presenter,
+      commands: undefined,
+      tokenMeter: undefined,
+      headLines: 4,
+      tailLines: 2,
+      showReasoning: false,
+      imageReader: reader,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
+      defaultRoute: undefined,
+    })
+    shell.start()
+    shell.observe(agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'image', attachment: imageRef }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }))
+    ;(tui.layoutRoot as { render(width: number): string[] }).render(80)
+    const before = tui.renders
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(tui.renders).toBeGreaterThan(before)
   })
 })
 
@@ -643,6 +752,9 @@ describe('TerminalShell input-trigger menus', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
       autocomplete: {
         commands: () => roster,
@@ -707,6 +819,9 @@ describe('TerminalShell input-trigger menus', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
       autocomplete: {
         commands: () => roster,
@@ -775,6 +890,9 @@ describe('TerminalShell input-trigger menus', () => {
       headLines: 4,
       tailLines: 2,
       showReasoning: false,
+      imageReader: undefined,
+      imageMaxWidthCells: 60,
+      imageMaxHeightCells: undefined,
       defaultRoute: undefined,
       autocomplete: {
         commands: () => roster,
@@ -831,6 +949,9 @@ describe('TerminalShell input-trigger menus', () => {
         headLines: 4,
         tailLines: 2,
         showReasoning: false,
+        imageReader: undefined,
+        imageMaxWidthCells: 60,
+        imageMaxHeightCells: undefined,
         defaultRoute: undefined,
         autocomplete: {
           commands: () => roster,
