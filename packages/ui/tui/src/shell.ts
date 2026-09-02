@@ -325,6 +325,7 @@ export class TerminalShell implements PanelHost {
     content += ' '.repeat(Math.max(0, gutter - visibleWidth(content)))
     const editorLines = this.editor.render(Math.max(1, width - gutter))
     const blank = ' '.repeat(gutter)
+    /* v8 ignore next -- the editor borders make a real render at least two lines, so the marker row is always 1 */
     const markerRow = editorLines.length >= 2 ? 1 : 0
     return editorLines.map((line, index) => (index === markerRow ? content : blank) + line)
   }
