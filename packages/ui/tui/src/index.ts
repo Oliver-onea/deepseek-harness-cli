@@ -36,7 +36,7 @@ import { childDisplayName, childRunning, type MenuSkill, type RunningChild } fro
 import { helpText } from './command-help.ts'
 import { runModelCommand } from './model-picker.ts'
 import { TerminalQuestions } from './questions.ts'
-import { createPalette, detectColorDepth, type ColorDepth } from './theme.ts'
+import { createPalette, detectColorDepth, type ColorDepth, type Palette } from './theme.ts'
 import { TerminalShell, paneTitle } from './shell.ts'
 import type { ToolOutcome } from './transcript.ts'
 import type { AttachmentImageReader, ToolPresenter } from './view.ts'
@@ -191,6 +191,26 @@ export function resolveColorDepth(
   if (!color || colorDepth === 'none') return undefined
   if (colorDepth === 'auto') return detectColorDepth(env)
   return colorDepth
+}
+
+/**
+ * Build the terminal palette from the configured color flag, the configured
+ * depth, and the live terminal environment. A `colorDepth` of `none` pins the
+ * colorless rung even when `color` is on, so the palette stays identity-styled
+ * — emitting no SGR of its own — rather than dropping through to the 16-color
+ * tier the resolved `undefined` depth would otherwise default to.
+ * @param color - whether to emit SGR sequences at all.
+ * @param colorDepth - the configured depth or `auto`.
+ * @param env - the terminal environment.
+ * @returns the role-keyed styles the renderer uses.
+ */
+export function createTerminalPalette(
+  color: boolean,
+  colorDepth: 'auto' | ColorDepth | 'none',
+  env: { COLORTERM?: string | undefined; TERM?: string | undefined },
+): Palette {
+  const depth = resolveColorDepth(color, colorDepth, env)
+  return createPalette(depth !== undefined, depth ?? '16')
 }
 
 /**
@@ -396,7 +416,7 @@ async function start(ctx: Context, config: Config): Promise<void> {
   if (agent === undefined) return
 
   const depth = resolveColorDepth(settings.color, settings.colorDepth, process.env)
-  const palette = createPalette(settings.color, depth ?? '16')
+  const palette = createTerminalPalette(settings.color, settings.colorDepth, process.env)
   const defaultRoute = ctx.get('agentDefaultModel')?.currentSelection()
   // The selection is agent-scoped state this front door owns: it fills the
   // persona's `{{provider}}`/`{{model}}` variables and routes each request.
