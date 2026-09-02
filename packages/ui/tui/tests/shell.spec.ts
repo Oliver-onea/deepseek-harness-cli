@@ -451,6 +451,25 @@ describe('TerminalShell', () => {
     expect(agent.followups).toHaveLength(1)
   })
 
+  it('ships a skill line to the model even when the skill catalog read fails', async () => {
+    // The catalog is what decides whether a slash line is a skill; a read
+    // that throws must not turn the invocation into a command error, so the
+    // shell falls open and the line still reaches the model as a prompt.
+    const commands = { find: () => undefined, execute: vi.fn() } as unknown as CommandRuntime
+    const autocomplete: AutocompleteOptions = {
+      commands: () => [],
+      skills: () => Promise.reject(new Error('catalog unreadable')),
+      maxVisible: 8,
+    }
+    const { shell, tui, agent } = shellFor({ commands, autocomplete })
+    shell.start()
+    await submit(tui, '/review')
+    expect(agent.followups).toHaveLength(1)
+    expect(agent.followups[0]?.content).toEqual([{ type: 'text', text: '/review' }])
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80).join('\n')
+    expect(drawn).not.toContain('Unknown command')
+  })
+
   it('prompts the model when the composition mounts no command registry', async () => {
     const { shell, tui, agent } = shellFor()
     shell.start()
@@ -566,6 +585,36 @@ describe('TerminalShell', () => {
     shell.start()
     const narrow = (tui.layoutRoot as { render(width: number): string[] }).render(9).join('\n')
     expect(narrow).not.toContain('›')
+  })
+
+  it('forwards a layout invalidation into the composed editor row', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const editor = tui.focused as unknown as { invalidate: () => void }
+    const invalidated = vi.spyOn(editor, 'invalidate')
+    // The layout root is the real VStack/ScrollView composition: an
+    // invalidation propagates containers' children, so the input row's own
+    // invalidate — the editor — must hear it.
+    ;(tui.layoutRoot as Component).invalidate()
+    expect(invalidated).toHaveBeenCalled()
+  })
+
+  it('keeps the prompt marker on the input row once the input spans two lines', () => {
+    const { shell, tui } = shellFor()
+    shell.start()
+    const editor = tui.focused as unknown as { handleInput(data: string): void }
+    editor.handleInput('x')
+    editor.handleInput('\x0a')
+    editor.handleInput('y')
+    const drawn = (tui.layoutRoot as { render(width: number): string[] }).render(80)
+    const xRow = drawn.findIndex(line => line.includes('x'))
+    const yRow = drawn.findIndex(line => line.includes('y'))
+    expect(xRow).toBeGreaterThanOrEqual(0)
+    expect(yRow).toBe(xRow + 1)
+    // Row 1 carries the marker; the gutter above stays blank.
+    expect(drawn[xRow]).toMatch(/^›/u)
+    expect(drawn[yRow]).not.toContain('›')
+    expect(drawn[yRow]).toMatch(/^ {2}/u)
   })
 
   it('reflects changing goal state without a new session event', () => {
