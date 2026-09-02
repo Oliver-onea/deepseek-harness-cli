@@ -267,6 +267,7 @@ export class Transcript {
     if (entry.tone === 'error') {
       for (let index = this.items.length - 1; index >= 0; index -= 1) {
         const candidate = this.items[index]
+        /* v8 ignore next -- the backwards scan stops at index 0, so the item always exists; the guard satisfies noUncheckedIndexedAccess */
         if (candidate === undefined) break
         if (candidate.kind === 'user') continue
         if (candidate.kind === 'notice' && candidate.tone === 'error' && candidate.text === entry.text) {

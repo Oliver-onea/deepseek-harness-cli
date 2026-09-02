@@ -122,6 +122,19 @@ describe('TranscriptView', () => {
     expect(lines.join('\n')).toContain('Title')
   })
 
+  it('syntax-highlights a fenced code block through the palette', () => {
+    const transcript = new Transcript()
+    const items = transcript.entries as TranscriptEntry[]
+    items.push({ kind: 'assistant', text: '```ts\nconst x = 1\n```', streaming: false })
+    const palette = createPalette(true, 'truecolor')
+    const view = new TranscriptView(transcript, { palette, presenter: presenter(), images: imageOptions() })
+    const drawn = view.render(40).join('\n')
+    // The ts highlighter styles the keyword and leaves the rest of the line
+    // at terminal default. The styled run proves the fence reached
+    // highlightCode rather than the plain codeBlock fallback.
+    expect(drawn).toContain(`  ${palette.codeKeyword('const')} x = 1`)
+  })
+
   it('hides reasoning until the reader asks for it', () => {
     const view = viewOver([
       { kind: 'reasoning', text: 'thinking', streaming: true },
@@ -135,6 +148,15 @@ describe('TranscriptView', () => {
   it('wraps a long line to the viewport', () => {
     const lines = viewOver([{ kind: 'notice', tone: 'info', text: 'a'.repeat(30) }]).render(12)
     expect(lines.filter(line => line !== '').length).toBeGreaterThan(1)
+  })
+
+  it('draws nothing for an assistant turn whose text renders to zero lines', () => {
+    // Markdown renders no lines for empty text, so a bare `◆` marker must
+    // not appear; whitespace-only text normalizes to the same empty body.
+    expect(viewOver([{ kind: 'assistant', text: '', streaming: false }]).render(40)).toEqual([''])
+    const whitespace = viewOver([{ kind: 'assistant', text: '   ', streaming: false }]).render(40)
+    expect(whitespace).toEqual([''])
+    expect(whitespace.join('\n')).not.toContain('◆')
   })
 
   it.each([['info'], ['warn'], ['error']] as const)('draws a %s notice', (tone) => {
