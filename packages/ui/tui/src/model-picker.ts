@@ -16,6 +16,7 @@ import { contentHasImage, type ContentBlock, type LlmRuntime, type ReasoningEffo
 import { menuRowsFor } from './autocomplete.ts'
 import { displayLine } from './display-text.ts'
 import { DIRECT_SELECT_LIMIT, type PanelHost } from './questions.ts'
+import { cursorRow } from './theme.ts'
 import type { Palette } from './theme.ts'
 
 /** Efforts one advertised route supports, read from its adapter's declaration. */
@@ -402,9 +403,9 @@ export class ModelPickerPanel implements Component {
         && candidate.provider === current.provider
         && candidate.model === current.model
       const number = index < DIRECT_SELECT_LIMIT ? `${index + 1}.` : '  '
-      const row = ` ${number} ${marked ? '●' : ' '} ${displayLine(`${candidate.provider}/${candidate.model}`)} — ${candidate.name}`
+      const row = `  ${number} ${marked ? '●' : ' '} ${displayLine(`${candidate.provider}/${candidate.model}`)} — ${candidate.name}`
         .slice(0, width)
-      lines.push(index === this.cursor ? palette.selected(row) : row)
+      lines.push(cursorRow(row, index === this.cursor, palette))
     }
     const hidden = this.candidates.length - shown.length
     if (hidden > 0) lines.push(palette.dim(`… ${hidden} more`))
@@ -436,8 +437,8 @@ export class ModelPickerPanel implements Component {
       const index = first + position
       const effective = marked !== undefined && row.request.kind === 'effort' && row.request.id === marked
       const number = index < DIRECT_SELECT_LIMIT ? `${index + 1}.` : '  '
-      const text = ` ${number} ${effective ? '●' : ' '} ${row.label}`.slice(0, width)
-      lines.push(index === tier.cursor ? palette.selected(text) : text)
+      const text = `  ${number} ${effective ? '●' : ' '} ${row.label}`.slice(0, width)
+      lines.push(cursorRow(text, index === tier.cursor, palette))
     }
     const hidden = tier.rows.length - shown.length
     if (hidden > 0) lines.push(palette.dim(`… ${hidden} more`))
