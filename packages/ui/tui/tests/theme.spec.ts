@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createPalette, detectColorDepth } from '../src/theme.ts'
-import { resolveColorDepth } from '../src/index.ts'
+import { createTerminalPalette, resolveColorDepth } from '../src/index.ts'
 
 describe('detectColorDepth', () => {
   it('reads a truecolor advertisement from COLORTERM', () => {
@@ -52,6 +52,18 @@ describe('createPalette', () => {
     for (const depth of ['truecolor', '256', '16'] as const) {
       expect(createPalette(true, depth).selected('row')).toBe('\x1b[7mrow\x1b[27m')
     }
+  })
+
+  it('draws the colorless rung when colorDepth is none, even with color on', () => {
+    // resolveColorDepth yields undefined for `none`; the terminal palette must
+    // treat that as the colorless rung rather than dropping to the 16-color
+    // tier, or a `colorDepth: none` config would still emit SGR.
+    const env = { COLORTERM: 'truecolor' }
+    expect(resolveColorDepth(true, 'none', env)).toBeUndefined()
+    const palette = createTerminalPalette(true, 'none', env)
+    expect(palette.error('boom')).toBe('boom')
+    expect(palette.accent('dsh')).toBe('dsh')
+    expect(palette.selected('row')).toBe('row')
   })
 })
 
